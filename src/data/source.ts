@@ -1,4 +1,4 @@
-import type { CarPhoto, CarRequest, Incident, LotEvent, PlateHistory, VehicleProfile, LotMap, ParkedCar, PhotoSide, Shift, Tip } from '../types';
+import type { CarPhoto, CarRequest, Feedback, Incident, LotEvent, PlateHistory, VehicleProfile, LotMap, ParkedCar, PhotoSide, Shift, Tip } from '../types';
 import type { Outbox } from './outbox';
 import type { ReportData } from '../report';
 
@@ -107,6 +107,8 @@ export interface DataSource {
     /** shifts or tips changed */
     team?: () => void;
     incidents?: () => void;
+    /** a guest just rated a visit (managers and admins only) */
+    feedback?: (f: Feedback) => void;
     live?: (live: boolean) => void;
   }): () => void;
 }

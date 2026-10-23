@@ -17,6 +17,8 @@ interface GuestCar {
     claimed_by_name: string;
     ready_at: string | null;
   } | null;
+  /** their answer to the one question after pickup */
+  feedback?: { rating: number; comment: string } | null;
 }
 
 type Load = { kind: 'loading' } | { kind: 'missing' } | { kind: 'offline' } | { kind: 'car'; car: GuestCar };
@@ -105,7 +107,10 @@ export default function GuestPage({ token }: { token: string }) {
             </div>
 
             {!car.parked ? (
-              <Step tone="done" title="Picked up" text="Thanks for valeting with us. Drive safe!" />
+              <>
+                <Step tone="done" title="Picked up" text="Thanks for valeting with us. Drive safe!" />
+                <Survey token={token} feedback={car.feedback ?? null} onSaved={show} />
+              </>
             ) : !req ? (
               <>
                 <p className="muted">When you're ready to leave, tap below and we'll start bringing your car up.</p>
@@ -140,6 +145,91 @@ export default function GuestPage({ token }: { token: string }) {
         )}
       </main>
       <p className="guest-foot">Powered by Valetate</p>
+    </div>
+  );
+}
+
+const LABELS = ['Poor', 'Not great', 'Okay', 'Good', 'Excellent'];
+
+/** The one question: tap a star (saved right away), then an optional comment. */
+function Survey({ token, feedback, onSaved }: { token: string; feedback: GuestCar['feedback']; onSaved: (data: unknown) => void }) {
+  const [hover, setHover] = useState(0);
+  const [picked, setPicked] = useState(feedback?.rating ?? 0);
+  const [note, setNote] = useState(feedback?.comment ?? '');
+  const [sent, setSent] = useState(!!feedback?.comment);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const save = async (stars: number | null, comment: string | null) => {
+    if (!supabase) return false;
+    setBusy(true);
+    setFailed(false);
+    const { data, error } = await supabase.rpc('guest_feedback', { token, stars, note: comment });
+    setBusy(false);
+    if (error) {
+      setFailed(true);
+      return false;
+    }
+    onSaved(data);
+    return true;
+  };
+  const rate = (n: number) => {
+    const before = picked;
+    setPicked(n);
+    save(n, null).then((ok) => ok || setPicked(before));
+  };
+  const shown = hover || picked;
+
+  return (
+    <div className="survey">
+      <h2>{picked ? 'Thanks for rating us' : 'How was your valet service?'}</h2>
+      <div className="survey-stars" role="radiogroup" aria-label="Your rating" onPointerLeave={() => setHover(0)}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            role="radio"
+            aria-checked={picked === n}
+            aria-label={`${n} ${n === 1 ? 'star' : 'stars'}, ${LABELS[n - 1]}`}
+            className={n <= shown ? 'on' : ''}
+            onPointerEnter={(e) => e.pointerType === 'mouse' && setHover(n)}
+            onClick={() => rate(n)}
+            disabled={busy}
+          >
+            ★
+          </button>
+        ))}
+      </div>
+      <p className="survey-label" aria-live="polite">
+        {shown ? LABELS[shown - 1] : 'Tap a star'}
+      </p>
+      {failed && <p className="warn">Couldn't send that. Check your signal and tap again.</p>}
+      {picked > 0 &&
+        (sent ? (
+          <p className="muted center">
+            Thanks for letting us know.{' '}
+            <button className="link" onClick={() => setSent(false)}>
+              Edit
+            </button>
+          </p>
+        ) : (
+          <form
+            className="survey-note"
+            onSubmit={(e) => {
+              e.preventDefault();
+              save(null, note).then((ok) => ok && setSent(true));
+            }}
+          >
+            <label>
+              <span>{picked <= 3 ? "Sorry it wasn't better. What went wrong?" : 'Anything the team should know? (optional)'}</span>
+              <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={1000} />
+            </label>
+            {note.trim() && (
+              <button className="primary" disabled={busy}>
+                {busy ? 'Sending…' : 'Send'}
+              </button>
+            )}
+          </form>
+        ))}
     </div>
   );
 }

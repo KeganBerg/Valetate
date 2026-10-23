@@ -227,3 +227,17 @@ export interface PlateHistory {
   incidents: number;
   lastIncident: string;
 }
+
+/** A guest's answer to "How was your valet service?", from their car link after pickup. */
+export interface Feedback {
+  id: string;
+  carId: string | null;
+  ticket: string;
+  /** 1 to 5 stars */
+  rating: number;
+  comment: string;
+  /** who brought the car up */
+  valetId: string;
+  valetName: string;
+  createdAt: number;
+}

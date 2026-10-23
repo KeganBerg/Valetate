@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { DataSource } from '../data/source';
-import { buildReport, hourText, valetCsv, waitText, type ReportData } from '../report';
+import { buildReport, hourText, valetCsv, waitText, type Report, type ReportData } from '../report';
 import { dayStart, money } from '../shifts';
 import { useDialog } from '../dialog';
 
@@ -44,6 +44,7 @@ export function Dashboard({ source, onClose }: { source: DataSource; onClose: ()
 
   const r = useMemo(() => (data ? buildReport(data, from, now + 1, now) : null), [data, from, now]);
   const [chart, setChart] = useState<'requests' | 'carsIn'>('requests');
+  const rated = !!r?.guests?.ratings;
 
   const download = () => {
     if (!r) return;
@@ -171,6 +172,7 @@ export function Dashboard({ source, onClose }: { source: DataSource; onClose: ()
                         <th>Avg wait</th>
                         <th>On clock</th>
                         <th>Tips</th>
+                        {rated && <th>Rating</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -182,6 +184,11 @@ export function Dashboard({ source, onClose }: { source: DataSource; onClose: ()
                           <td className={v.avgWait != null && v.avgWait > 10 * 60000 ? 'warn-text' : ''}>{waitText(v.avgWait)}</td>
                           <td>{v.minutesOn ? hours(v.minutesOn) : '–'}</td>
                           <td>{v.tipsCents ? money(v.tipsCents) : '–'}</td>
+                          {rated && (
+                            <td className={v.rating != null && v.rating < 3.5 ? 'warn-text' : ''} title={v.ratings ? `${v.ratings} ${v.ratings === 1 ? 'rating' : 'ratings'}` : undefined}>
+                              {v.rating == null ? '–' : `${v.rating.toFixed(1)} ★`}
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -190,12 +197,80 @@ export function Dashboard({ source, onClose }: { source: DataSource; onClose: ()
               ) : (
                 <p className="muted">Nobody to show yet.</p>
               )}
-              <p className="hint">Wait is from the request (or the let-out, for cars asked for ahead) to the car at the stand. Tips are each person's share of the pool.</p>
+              <p className="hint">
+                Wait is from the request (or the let-out, for cars asked for ahead) to the car at the stand. Tips are each person's share of the pool.
+                {rated && ' Rating is what guests gave the cars each person brought up.'}
+              </p>
             </section>
+
+            {r.guests && <GuestRatings g={r.guests} />}
           </>
         )}
       </div>
     </div>
+  );
+}
+
+const stars = (n: number) => '★★★★★'.slice(0, Math.round(n)) + '☆☆☆☆☆'.slice(0, 5 - Math.round(n));
+const when = (t: number) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+/** What guests said after pickup: the average, how the stars spread, and every comment or low rating. */
+function GuestRatings({ g }: { g: NonNullable<Report['guests']> }) {
+  const [all, setAll] = useState(false);
+  const top = Math.max(1, ...g.stars);
+  const said = all ? g.said : g.said.slice(0, 5);
+  return (
+    <section className="dash-section">
+      <h3>Guest ratings</h3>
+      {g.ratings ? (
+        <>
+          <div className="rating-sum">
+            <div className={`rating-big ${g.avg != null && g.avg < 3.5 ? 'bad' : ''}`}>
+              <b>{g.avg!.toFixed(1)}</b>
+              <span className="stars" aria-hidden>
+                {stars(g.avg!)}
+              </span>
+              <small>
+                {g.ratings} {g.ratings === 1 ? 'rating' : 'ratings'}
+              </small>
+            </div>
+            <ul className="rating-dist" aria-label="How the stars spread">
+              {[5, 4, 3, 2, 1].map((n) => (
+                <li key={n} aria-label={`${n} stars: ${g.stars[n - 1]}`}>
+                  <span>{n}★</span>
+                  <i>
+                    <i className={n <= 2 ? 'low' : ''} style={{ width: `${(g.stars[n - 1] / top) * 100}%` }} />
+                  </i>
+                  <span>{g.stars[n - 1]}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          {said.length > 0 && (
+            <ul className="said">
+              {said.map((f) => (
+                <li key={f.id}>
+                  <span className={`stars ${f.rating <= 2 ? 'low' : ''}`} aria-label={`${f.rating} stars`}>
+                    {stars(f.rating)}
+                  </span>
+                  <p>{f.comment ? `“${f.comment}”` : <span className="muted">No comment</span>}</p>
+                  <small>
+                    {[f.ticket && `#${f.ticket}`, f.valetName && `brought up by ${f.valetName.split(' ')[0]}`, when(f.createdAt)].filter(Boolean).join(' · ')}
+                  </small>
+                </li>
+              ))}
+            </ul>
+          )}
+          {g.said.length > 5 && (
+            <button className="link" onClick={() => setAll(!all)}>
+              {all ? 'Show fewer' : `Show all ${g.said.length}`}
+            </button>
+          )}
+        </>
+      ) : (
+        <p className="muted">No ratings yet. After pickup, the guest's car link asks one question: how was your valet service?</p>
+      )}
+    </section>
   );
 }
 

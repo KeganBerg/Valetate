@@ -3207,3 +3207,162 @@ button.fill-btn {
   font-size: 16px;
   resize: vertical;
 }
+
+/* ---------- guest feedback ---------- */
+.survey {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 16px 12px 14px;
+  border-radius: 14px;
+  background: var(--panel-2);
+}
+.survey h2 {
+  margin: 0;
+  font-size: 18px;
+  text-align: center;
+}
+.survey-stars {
+  display: flex;
+  gap: 4px;
+}
+.survey-stars button {
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  font-size: 40px;
+  line-height: 1;
+  color: #4a5260;
+  transition: color 0.12s, transform 0.12s;
+}
+.survey-stars button.on {
+  color: #ffc53d;
+}
+.survey-stars button:active {
+  transform: scale(0.88);
+}
+.survey-stars button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -4px;
+  border-radius: 10px;
+}
+.survey-label {
+  min-height: 20px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.survey-note {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+}
+.survey-note label {
+  display: grid;
+  gap: 6px;
+}
+.survey-note label span {
+  color: var(--muted);
+}
+.survey-note textarea {
+  width: 100%;
+  resize: vertical;
+}
+.survey .warn {
+  text-align: center;
+}
+
+/* stand report */
+.rating-sum {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 18px;
+  align-items: center;
+  margin: 8px 0 14px;
+}
+.rating-big {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+.rating-big b {
+  font-size: 34px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.rating-big.bad b {
+  color: #ff8a8d;
+}
+.rating-big small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.stars {
+  color: #ffc53d;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+.stars.low {
+  color: #ff8a8d;
+}
+.rating-dist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+.rating-dist li {
+  display: grid;
+  grid-template-columns: 26px 1fr 28px;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.rating-dist li > span:last-child {
+  text-align: right;
+}
+.rating-dist li > i {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.rating-dist li > i > i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: #ffc53d;
+}
+.rating-dist li > i > i.low {
+  background: #ff8a8d;
+}
+.said {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.said li {
+  background: var(--panel-2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+.said p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.said small {
+  color: var(--muted);
+  font-size: 12px;
+}

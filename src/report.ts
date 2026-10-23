@@ -1,5 +1,5 @@
 import { minutesOn, splitPool } from './shifts';
-import type { Shift, Tip } from './types';
+import type { Feedback, Shift, Tip } from './types';
 
 const HISTORY_KEY = 'valetate.history.v1';
 
@@ -38,6 +38,8 @@ export interface ReportData {
   shifts: Shift[];
   /** user id → name, for everyone who shows up in the data */
   people: Record<string, string>;
+  /** guest ratings; left out where guests can't rate (single-device mode) */
+  feedback?: Feedback[];
 }
 
 // ---------- single-device history ----------
@@ -76,6 +78,9 @@ export interface ValetRow {
   avgWait: number | null;
   minutesOn: number;
   tipsCents: number;
+  /** average guest rating for cars they brought up; null with none */
+  rating: number | null;
+  ratings: number;
 }
 
 export interface Report {
@@ -103,6 +108,15 @@ export interface Report {
   shifts: number;
   /** tips per shift worked, cents */
   tipsPerShift: number | null;
+  /** null where guests can't rate */
+  guests: {
+    ratings: number;
+    avg: number | null;
+    /** how many gave 1, 2, 3, 4 and 5 stars */
+    stars: [number, number, number, number, number];
+    /** newest first: everything with a comment or 3 stars and under */
+    said: Feedback[];
+  } | null;
 }
 
 /** when the guest started waiting: when they asked, or the let-out for a car asked for ahead */
@@ -174,7 +188,7 @@ export function buildReport(data: ReportData, from: number, to: number, now: num
   const row = (id: string, name?: string) => {
     let r = rows.get(id);
     if (!r) {
-      r = { userId: id, name: data.people[id] || name || 'Valet', parked: 0, broughtUp: 0, avgWait: null, minutesOn: 0, tipsCents: 0 };
+      r = { userId: id, name: data.people[id] || name || 'Valet', parked: 0, broughtUp: 0, avgWait: null, minutesOn: 0, tipsCents: 0, rating: null, ratings: 0 };
       rows.set(id, r);
     }
     return r;
@@ -186,6 +200,14 @@ export function buildReport(data: ReportData, from: number, to: number, now: num
     const r = row(s.userId, s.name);
     r.minutesOn = s.minutes;
     r.tipsCents = s.cents;
+  }
+  const rated = (data.feedback ?? []).filter((f) => inRange(f.createdAt));
+  const byRater = new Map<string, number[]>();
+  for (const f of rated) if (f.valetId) byRater.set(f.valetId, [...(byRater.get(f.valetId) ?? []), f.rating]);
+  for (const [id, rs] of byRater) {
+    const r = row(id, rated.find((f) => f.valetId === id)?.valetName);
+    r.rating = avg(rs);
+    r.ratings = rs.length;
   }
   const valets = [...rows.values()].sort((a, b) => b.parked + b.broughtUp - (a.parked + a.broughtUp) || b.minutesOn - a.minutesOn);
 
@@ -208,6 +230,14 @@ export function buildReport(data: ReportData, from: number, to: number, now: num
     cashCents: tips.filter((t) => t.method === 'cash').reduce((s, t) => s + t.amountCents, 0),
     shifts: shifts.length,
     tipsPerShift: shifts.length ? Math.round(tipsCents / shifts.length) : null,
+    guests: data.feedback
+      ? {
+          ratings: rated.length,
+          avg: avg(rated.map((f) => f.rating)),
+          stars: [1, 2, 3, 4, 5].map((n) => rated.filter((f) => f.rating === n).length) as [number, number, number, number, number],
+          said: rated.filter((f) => f.comment.trim() || f.rating <= 3).sort((a, b) => b.createdAt - a.createdAt),
+        }
+      : null,
   };
 }
 
@@ -228,7 +258,7 @@ export const hourText = (h: number) => `${h % 12 || 12} ${h < 12 ? 'AM' : 'PM'}`
 /** A CSV of the valet table, for payroll or the boss. */
 export function valetCsv(r: Report): string {
   const q = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-  const lines = [['Valet', 'Cars parked', 'Cars brought up', 'Avg wait (min)', 'Hours on', 'Tips ($)'].join(',')];
+  const lines = [['Valet', 'Cars parked', 'Cars brought up', 'Avg wait (min)', 'Hours on', 'Tips ($)', 'Guest rating', 'Ratings'].join(',')];
   for (const v of r.valets)
     lines.push(
       [
@@ -238,6 +268,8 @@ export function valetCsv(r: Report): string {
         v.avgWait == null ? '' : (v.avgWait / 60000).toFixed(1),
         (v.minutesOn / 60).toFixed(2),
         (v.tipsCents / 100).toFixed(2),
+        v.rating == null ? '' : v.rating.toFixed(1),
+        v.ratings || '',
       ].join(','),
     );
   return lines.join('\n');

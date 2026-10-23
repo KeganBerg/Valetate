@@ -19,7 +19,7 @@ import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
 import { liveRequests, newGuestToken } from './requests';
 import { createPhotoQueue } from './photoQueue';
-import type { CarRequest, Incident, LotEvent, LotMap, MapItem, ParkedCar, Shift, Spot, Tip } from './types';
+import type { CarRequest, Feedback, Incident, LotEvent, LotMap, MapItem, ParkedCar, Shift, Spot, Tip } from './types';
 import { almostFull, isPre, standPoint } from './surge';
 import { EventDialog, EventPill } from './components/EventMode';
 import { forgetPlate } from './components/GuestNote';
@@ -335,6 +335,15 @@ export default function App({ source, role, account, initialMaps, initialCars, c
   useEffect(() => {
     refreshIncidents();
   }, [refreshIncidents]);
+  // a guest who had a bad time: tell a manager while they might still be at the curb
+  const onFeedback = useCallback(
+    (f: Feedback) => {
+      if (role === 'valet' || f.rating > 2) return;
+      flash(`${'★'.repeat(f.rating)} from #${f.ticket || '—'}${f.comment ? `: “${f.comment.slice(0, 60)}”` : ''}`, () => setReportOpen(true), 'View');
+      navigator.vibrate?.([200, 80, 200]);
+    },
+    [role, flash],
+  );
   const lookupPlate = useCallback((plate: string) => source.lookupPlate(plate), [source]);
   const openIncidents = incidents.filter((i) => i.status === 'open').length;
   const refreshTeam = useCallback(async () => {
@@ -452,6 +461,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
         event: refreshEvent,
         team: refreshTeam,
         incidents: refreshIncidents,
+        feedback: onFeedback,
         live: setLive,
         maps: async () => {
           const ms = await source.listMaps().catch(() => null);
@@ -466,7 +476,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
           }
         },
       }),
-    [source, refreshCars, refreshRequests, refreshEvent, refreshTeam, refreshIncidents],
+    [source, refreshCars, refreshRequests, refreshEvent, refreshTeam, refreshIncidents, onFeedback],
   );
 
   // a phone that slept or lost signal missed changes: catch up as soon as it's back
