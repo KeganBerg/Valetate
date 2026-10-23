@@ -1430,3 +1430,37 @@ button.guest-ask {
   font-weight: 500;
   font-size: 15px;
 }
+
+/* ---------- invite links ---------- */
+.people li.invite-row {
+  flex-wrap: wrap;
+}
+.invite-share {
+  flex: 1 1 100%;
+  text-align: center;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 8px 0;
+}
+.invite-share .qr {
+  background: #fff;
+  border-radius: 12px;
+  padding: 8px;
+  width: min(200px, 100%);
+  margin: 0 auto 8px;
+}
+.invite-share .qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.invite-share .actions {
+  justify-content: center;
+}
+.invite-share .code {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}

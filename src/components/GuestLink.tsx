@@ -6,7 +6,7 @@ export function guestUrl(token: string) {
   return `${location.origin}${location.pathname}?car=${token}`;
 }
 
-function QrSvg({ text }: { text: string }) {
+export function QrSvg({ text }: { text: string }) {
   const svg = useMemo(() => {
     const qr = qrcode(0, 'M');
     qr.addData(text);

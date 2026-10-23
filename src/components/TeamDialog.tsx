@@ -1,8 +1,41 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ROLE_INFO, type Role } from '../data/source';
-import { team, type Invite, type Member } from '../data/supabase';
+import { formatCode, inviteLink, team, type Invite, type Member } from '../data/supabase';
+import { QrSvg } from './GuestLink';
 
 const ROLES: Role[] = ['admin', 'manager', 'valet'];
+
+/** Text, share, copy or scan one invite link. */
+function InviteShare({ invite, companyName }: { invite: Pick<Invite, 'code' | 'role' | 'label'>; companyName: string }) {
+  const [copied, setCopied] = useState(false);
+  const url = inviteLink(invite.code);
+  const text = `Join ${companyName} on Valetate as ${ROLE_INFO[invite.role].name.toLowerCase()}: ${url}`;
+  return (
+    <div className="invite-share">
+      <QrSvg text={url} />
+      <p className="hint">
+        Text this link{invite.label ? ` to ${invite.label}` : ''}, or let them scan the code. It works once and expires in 14 days.
+        Code: <b className="code">{formatCode(invite.code)}</b>
+      </p>
+      <div className="actions">
+        <a className="button primary" href={`sms:${/iPhone|iPad/.test(navigator.userAgent) ? '&' : '?'}body=${encodeURIComponent(text)}`}>
+          Text it
+        </a>
+        {'share' in navigator && <button onClick={() => navigator.share({ text }).catch(() => {})}>Share…</button>}
+        <button
+          onClick={() =>
+            navigator.clipboard.writeText(url).then(
+              () => setCopied(true),
+              () => setCopied(false),
+            )
+          }
+        >
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 interface Props {
   companyId: string;
@@ -16,7 +49,9 @@ interface Props {
 export function TeamDialog({ companyId, companyName, me, onClose, onRolesChanged }: Props) {
   const [members, setMembers] = useState<Member[] | null>(null);
   const [invites, setInvites] = useState<Invite[]>([]);
-  const [email, setEmail] = useState('');
+  const [label, setLabel] = useState('');
+  const [created, setCreated] = useState<Pick<Invite, 'code' | 'role' | 'label'> | null>(null);
+  const [showing, setShowing] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('valet');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -61,14 +96,14 @@ export function TeamDialog({ companyId, companyName, me, onClose, onRolesChanged
           className="invite"
           onSubmit={(e) => {
             e.preventDefault();
-            const em = email.trim().toLowerCase();
             act(async () => {
-              await team.invite(companyId, em, role, me);
-              setEmail('');
-            }, `Invited ${em}. They join as soon as they sign in with that email.`);
+              const code = await team.invite(companyId, role, label, me);
+              setCreated({ code, role, label: label.trim() });
+              setLabel('');
+            });
           }}
         >
-          <input type="email" placeholder="Invite by email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input placeholder="Who's it for? (optional)" value={label} onChange={(e) => setLabel(e.target.value)} aria-label="Who the invite is for" />
           <select value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label="Role">
             {ROLES.map((r) => (
               <option key={r} value={r}>
@@ -76,8 +111,9 @@ export function TeamDialog({ companyId, companyName, me, onClose, onRolesChanged
               </option>
             ))}
           </select>
-          <button className="primary">Invite</button>
+          <button className="primary">Create invite link</button>
         </form>
+        {created && <InviteShare invite={created} companyName={companyName} />}
         {notice && <p className="info">{notice}</p>}
         {error && <p className="error">{error}</p>}
 
@@ -136,13 +172,17 @@ export function TeamDialog({ companyId, companyName, me, onClose, onRolesChanged
             <h3>Waiting to join</h3>
             <ul className="people">
               {invites.map((i) => (
-                <li key={i.id}>
+                <li key={i.id} className="invite-row">
                   <div className="who">
-                    <b>{i.email}</b>
-                    <small>Invited {new Date(i.created_at).toLocaleDateString()}</small>
+                    <b>{i.label || 'Invite link'}</b>
+                    <small>
+                      {formatCode(i.code)} · expires {new Date(i.expires_at).toLocaleDateString()}
+                    </small>
                   </div>
                   <span className={`role role-${i.role}`}>{ROLE_INFO[i.role].name}</span>
+                  <button onClick={() => setShowing(showing === i.id ? null : i.id)}>{showing === i.id ? 'Hide' : 'Show'}</button>
                   <button onClick={() => act(() => team.revokeInvite(i.id))}>Cancel</button>
+                  {showing === i.id && <InviteShare invite={i} companyName={companyName} />}
                 </li>
               ))}
             </ul>
