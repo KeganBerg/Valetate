@@ -1,0 +1,95 @@
+export type AssetKind =
+  | 'space'
+  | 'spaceRow'
+  | 'ramp'
+  | 'booth'
+  | 'car'
+  | 'wall'
+  | 'pole'
+  | 'stairs'
+  | 'elevator'
+  | 'building'
+  | 'tree'
+  | 'palm'
+  | 'bush'
+  | 'island'
+  | 'arrow'
+  | 'crosswalk'
+  | 'laneLine'
+  | 'curb'
+  | 'zone'
+  | 'label';
+
+/**
+ * Every object on a map is an axis-aligned box (x, y, w, h) rotated by
+ * `rotation` degrees around its center. Kind-specific fields are optional.
+ */
+export interface MapItem {
+  id: string;
+  kind: AssetKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation: number;
+  label?: string;
+  color?: string;
+  /** label */
+  fontSize?: number;
+  /** space */
+  accessible?: boolean;
+  /** spaceRow: row letter(s), e.g. "D" makes spots "D 1", "D 2"... */
+  prefix?: string;
+  /** spaceRow: number of the first spot */
+  start?: number;
+  /** spaceRow: number of spots in the row */
+  count?: number;
+  /** spaceRow: count from the right/bottom end instead of the left/top */
+  reverse?: boolean;
+}
+
+export interface LotMap {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  /** ground color of the lot (asphalt, concrete...) */
+  surface: string;
+  items: MapItem[];
+  updatedAt: number;
+}
+
+/**
+ * A parkable spot. `key` is stable while the space exists (renumbering a row
+ * keeps keys of numbers that still exist), so tickets and requests can point at it.
+ */
+export interface Spot {
+  key: string;
+  label: string;
+  itemId: string;
+  /** index inside a row (0 for single spaces) */
+  index: number;
+  /** world center of the spot */
+  cx: number;
+  cy: number;
+  w: number;
+  h: number;
+  rotation: number;
+}
+
+/** A car currently parked on a spot (live lot). */
+export interface ParkedCar {
+  id: string;
+  mapId: string;
+  /** Spot.key, so the car follows its space if the map is rearranged */
+  spotKey: string;
+  /** label at the time of parking, shown if the spot is later removed */
+  spotLabel: string;
+  plate: string;
+  vehicle: string;
+  ownerName: string;
+  ownerPhone: string;
+  ticket: string;
+  notes: string;
+  parkedAt: number;
+}
