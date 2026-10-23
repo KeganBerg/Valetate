@@ -24,7 +24,12 @@ export interface DataSource {
   /** car changes waiting for signal (cloud only) */
   outbox?: Outbox;
   listMaps(): Promise<LotMap[]>;
-  saveMap(map: LotMap): Promise<void>;
+  /**
+   * Saves over `baseVersion` (the version this device last saw; none for a new
+   * map) and returns the new version. Throws MapConflict if someone else saved
+   * in between, so their work isn't silently overwritten.
+   */
+  saveMap(map: LotMap, baseVersion?: number): Promise<number | undefined>;
   deleteMap(id: string): Promise<void>;
   /** cars currently parked */
   listCars(): Promise<ParkedCar[]>;
@@ -57,4 +62,12 @@ export interface DataSource {
    * changes are arriving (false while the connection is down)
    */
   subscribe(on: { maps: () => void; cars: () => void; requests?: () => void; live?: (live: boolean) => void }): () => void;
+}
+
+/** Someone else saved (or deleted) the map since this device last saw it. */
+export class MapConflict extends Error {
+  /** their version, or null if the map was deleted */
+  constructor(readonly theirs: LotMap | null) {
+    super(theirs ? 'Someone else changed this map' : 'This map was deleted');
+  }
 }

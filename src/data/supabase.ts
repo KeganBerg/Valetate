@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { CarPhoto, CarRequest, LotMap, MapItem, ParkedCar, PhotoSide } from '../types';
-import type { CarDetails, DataSource, Role } from './source';
+import { MapConflict, type CarDetails, type DataSource, type Role } from './source';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
@@ -61,6 +61,8 @@ interface MapRow {
   surface: string;
   items: MapItem[];
   updated_at: string;
+  updated_by: string | null;
+  version: number;
 }
 
 interface CarRow {
@@ -89,6 +91,7 @@ const toMap = (r: MapRow): LotMap => ({
   surface: r.surface,
   items: Array.isArray(r.items) ? r.items : [],
   updatedAt: Date.parse(r.updated_at),
+  version: r.version,
 });
 
 const toCar = (r: CarRow): ParkedCar => ({
@@ -258,22 +261,36 @@ export function cloudSource(companyId: string, userId: string, userName: string)
       ) as MapRow[];
       return rows.map(toMap);
     },
-    async saveMap(m) {
-      check(
-        await db()
+    async saveMap(m, baseVersion) {
+      const row = {
+        name: m.name,
+        width: Math.round(m.width),
+        height: Math.round(m.height),
+        surface: m.surface,
+        items: m.items,
+        updated_at: new Date(m.updatedAt).toISOString(),
+        updated_by: userId,
+      };
+      if (baseVersion === undefined) {
+        const { data, error } = await db()
           .from('lot_maps')
-          .upsert({
-            id: m.id,
-            company_id: companyId,
-            name: m.name,
-            width: Math.round(m.width),
-            height: Math.round(m.height),
-            surface: m.surface,
-            items: m.items,
-            updated_at: new Date(m.updatedAt).toISOString(),
-            updated_by: userId,
-          }),
-      );
+          .insert({ id: m.id, company_id: companyId, ...row })
+          .select('version')
+          .maybeSingle();
+        if (!error) return (data as { version: number } | null)?.version;
+        // already there: an earlier try got through, or another device made it
+        if (!/lot_maps_pkey/.test(error.message)) check({ data, error });
+      } else {
+        // the server bumps the version; no row back means someone else saved first
+        const saved = check(
+          await db().from('lot_maps').update(row).eq('id', m.id).eq('version', baseVersion).select('version'),
+        ) as { version: number }[];
+        if (saved.length) return saved[0].version;
+      }
+      const theirs = check(await db().from('lot_maps').select('*').eq('id', m.id).maybeSingle()) as MapRow | null;
+      // our own save whose reply was lost
+      if (theirs && theirs.updated_by === userId && Date.parse(theirs.updated_at) === m.updatedAt) return theirs.version;
+      throw new MapConflict(theirs && toMap(theirs));
     },
     async deleteMap(id) {
       check(await db().from('lot_maps').delete().eq('id', id));
