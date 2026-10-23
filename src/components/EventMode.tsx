@@ -3,6 +3,7 @@ import { uid } from '../geometry';
 import { blockersOf } from '../stacks';
 import { clock, hhmm, isPre, nearestOpen, nextTime, pace, stagingList } from '../surge';
 import type { CarRequest, LotEvent, ParkedCar, Spot } from '../types';
+import { useDialog } from '../dialog';
 
 /** re-render every second while a countdown is on screen */
 function useSeconds(on = true) {
@@ -20,6 +21,7 @@ const tagOf = (c: ParkedCar) => (c.ticket ? `#${c.ticket}` : c.plate || 'Car');
 
 /** Start an event, or change its name and let-out time. */
 export function EventDialog({ event, onSave, onEnd, onClose }: { event: LotEvent | null; onSave: (e: LotEvent) => void; onEnd: () => void; onClose: () => void }) {
+  const dialog = useDialog<HTMLFormElement>(onClose);
   const [name, setName] = useState(event?.name ?? '');
   const [time, setTime] = useState(event ? hhmm(event.letOutAt) : '');
   const letOut = nextTime(time, Date.now());
@@ -27,7 +29,7 @@ export function EventDialog({ event, onSave, onEnd, onClose }: { event: LotEvent
     <div className="dialog-backdrop" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <form
         className="dialog event-dialog"
-        role="dialog"
+        {...dialog}
         aria-label="Event mode"
         onSubmit={(e) => {
           e.preventDefault();

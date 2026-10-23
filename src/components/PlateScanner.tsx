@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { loadReader, plateCrop, readPlate } from '../ocr';
 import { normalizePlate } from '../ops';
 import { plateKey } from '../plates';
+import { useDialog } from '../dialog';
 
 type Camera = 'starting' | 'live' | 'off';
 
@@ -23,6 +24,7 @@ interface Props {
  * result is always editable, since no reader gets every plate right.
  */
 export function PlateScanner({ title, useLabel = 'Use plate', onUse, onClose, describe }: Props) {
+  const dialog = useDialog(onClose);
   const video = useRef<HTMLVideoElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const photo = useRef<HTMLInputElement>(null);
@@ -66,12 +68,6 @@ export function PlateScanner({ title, useLabel = 'Use plate', onUse, onClose, de
       stream.current = null;
     };
   }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   // read frames until two of the last three reads agree
   useEffect(() => {
@@ -161,7 +157,7 @@ export function PlateScanner({ title, useLabel = 'Use plate', onUse, onClose, de
             : 'Fit the plate inside the box';
 
   return createPortal(
-    <div className="scanner" role="dialog" aria-label={title}>
+    <div className="scanner" {...dialog} aria-label={title}>
       <video ref={video} playsInline muted className={camera === 'live' ? '' : 'hidden'} />
       <header>
         <button className="icon" onClick={onClose} aria-label="Close">

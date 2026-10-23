@@ -3,6 +3,7 @@ import { uid } from '../geometry';
 import { carsWithKeysOut } from '../keys';
 import { dayStart, duration, latestHandoff, money, parseCents, splitPool, validTipUrl } from '../shifts';
 import type { CarRequest, ParkedCar, Shift, Tip } from '../types';
+import { useDialog } from '../dialog';
 
 const time = (t: number) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const QUICK = [1, 2, 3, 5, 10, 20];
@@ -29,6 +30,7 @@ interface Props {
 
 /** Clock in and out, log tips in one tap, see the pool split, and leave a note for the next crew. */
 export function ShiftSheet(props: Props) {
+  const dialog = useDialog(props.onClose);
   // the app's clock ticks slowly; a tip logged a second ago must already count
   const p = { ...props, now: Math.max(props.now, Date.now()) };
   const [method, setMethod] = useState<Tip['method']>('cash');
@@ -55,7 +57,7 @@ export function ShiftSheet(props: Props) {
 
   return (
     <div className="dialog-backdrop" onPointerDown={(e) => e.target === e.currentTarget && p.onClose()}>
-      <div className="dialog shift-sheet" role="dialog" aria-label="Shift and tips">
+      <div className="dialog shift-sheet" {...dialog} aria-label="Shift and tips">
         <header>
           <h2>Shift and tips</h2>
           <div className="grow" />

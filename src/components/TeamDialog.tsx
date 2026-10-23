@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ROLE_INFO, type Role } from '../data/source';
 import { formatCode, inviteLink, team, type Invite, type Member } from '../data/supabase';
 import { QrSvg } from './GuestLink';
+import { useDialog } from '../dialog';
 
 const ROLES: Role[] = ['admin', 'manager', 'valet'];
 
@@ -47,6 +48,7 @@ interface Props {
 }
 
 export function TeamDialog({ companyId, companyName, me, onClose, onRolesChanged }: Props) {
+  const dialog = useDialog(onClose);
   const [members, setMembers] = useState<Member[] | null>(null);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [label, setLabel] = useState('');
@@ -83,7 +85,7 @@ export function TeamDialog({ companyId, companyName, me, onClose, onRolesChanged
 
   return (
     <div className="dialog-backdrop" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog team" role="dialog" aria-label="Team">
+      <div className="dialog team" {...dialog} aria-label="Team">
         <header>
           <h2>{companyName} team</h2>
           <div className="grow" />

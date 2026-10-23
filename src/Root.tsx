@@ -1,10 +1,12 @@
 import type { AuthError, Session } from '@supabase/supabase-js';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import App from './App';
 import { alreadyRegistered, authMessage } from './authMessages';
-import { TeamDialog } from './components/TeamDialog';
+import { useBackToClose } from './dialog';
 import { localSource } from './data/local';
-import { withOutbox } from './data/outbox';
+import { isNetworkError, withOutbox } from './data/outbox';
+import { loadLot } from './lotCache';
+import { friendlyError } from './ops';
 import { canEditMaps, type DataSource, type Role } from './data/source';
 import {
   cloudSource,
@@ -16,6 +18,9 @@ import {
   type Membership,
 } from './data/supabase';
 import type { LotMap, ParkedCar } from './types';
+
+// opened now and then: loaded the first time they're needed
+const TeamDialog = lazy(() => import('./components/TeamDialog').then((m) => ({ default: m.TeamDialog })));
 
 const COMPANY_KEY = 'valetate.company.v1';
 const JOIN_KEY = 'valetate.joinCode';
@@ -59,20 +64,36 @@ function Workspace({
   source,
   role,
   account,
+  cacheKey,
 }: {
   source: DataSource;
   role: Role;
   account?: React.ComponentProps<typeof App>['account'];
+  cacheKey?: string;
 }) {
   const [data, setData] = useState<{ maps: LotMap[]; cars: ParkedCar[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setError(null);
+    // no signal (or barely any): open with the lot as this phone last saw it;
+    // the app catches up by itself once it reconnects
+    const saved = cacheKey ? loadLot(cacheKey) : null;
+    let shown = false;
+    const show = (d: { maps: LotMap[]; cars: ParkedCar[] }) => {
+      if (shown) return;
+      shown = true;
+      setData(d);
+    };
+    const fallback = window.setTimeout(() => saved && show(saved), navigator.onLine ? 4000 : 0);
     Promise.all([source.listMaps(), source.listCars()])
-      .then(([maps, cars]) => setData({ maps, cars }))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [source]);
+      .then(([maps, cars]) => show({ maps, cars }))
+      .catch((e) => {
+        if (saved && isNetworkError(e)) show(saved);
+        else if (!shown) setError(friendlyError(e));
+      })
+      .finally(() => window.clearTimeout(fallback));
+  }, [source, cacheKey]);
   useEffect(load, [load]);
 
   // valets wait for a map; pick up the first one as soon as it's published
@@ -109,7 +130,7 @@ function Workspace({
         </div>
       </div>
     );
-  return <App source={source} role={role} account={account} initialMaps={data.maps} initialCars={data.cars} />;
+  return <App source={source} role={role} account={account} initialMaps={data.maps} initialCars={data.cars} cacheKey={cacheKey} />;
 }
 
 type AuthMode = 'in' | 'up' | 'forgot';
@@ -130,6 +151,8 @@ function Login({ invited }: { invited: boolean }) {
     setMsg(null);
     setExists(false);
   };
+  // back from "Create account" or "Reset password" returns to Sign in
+  useBackToClose(mode !== 'in', () => go('in'));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -375,7 +398,8 @@ function Onboarding({
   );
 }
 
-function CompanyPicker({ list, onPick }: { list: Membership[]; onPick: (m: Membership) => void }) {
+function CompanyPicker({ list, onPick, onCancel }: { list: Membership[]; onPick: (m: Membership) => void; onCancel?: () => void }) {
+  useBackToClose(true, onCancel);
   return (
     <div className="screen">
       <div className="screen-card">
@@ -388,6 +412,11 @@ function CompanyPicker({ list, onPick }: { list: Membership[]; onPick: (m: Membe
             </button>
           ))}
         </div>
+        {onCancel && (
+          <button className="link" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
       </div>
     </div>
   );
@@ -427,7 +456,24 @@ function Cloud() {
         setJoinError(e instanceof Error ? e.message : String(e));
       }
     }
-    setMemberships(await myMemberships(session.user.id).catch(() => []));
+    // remembered so the app still opens to the right company with no signal
+    const key = `valetate.teams.${session.user.id}`;
+    let saved: Membership[] | null = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(key) ?? 'null');
+    } catch {
+      // nothing usable saved
+    }
+    const fallback = window.setTimeout(() => saved?.length && setMemberships((m) => m ?? saved), navigator.onLine ? 4000 : 0);
+    try {
+      const list = await myMemberships(session.user.id);
+      localStorage.setItem(key, JSON.stringify(list));
+      setMemberships(list);
+    } catch (e) {
+      setMemberships((m) => m ?? (isNetworkError(e) && saved ? saved : []));
+    } finally {
+      window.clearTimeout(fallback);
+    }
   }, [session?.user.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openCompany = (id?: string) => {
@@ -464,6 +510,7 @@ function Cloud() {
           setCompanyId(m.company.id);
           setPicking(false);
         }}
+        onCancel={current ? () => setPicking(false) : undefined}
       />
     );
 
@@ -477,15 +524,23 @@ function Cloud() {
   };
   return (
     <>
-      <Workspace key={current.company.id + current.role} source={source!} role={current.role} account={account} />
+      <Workspace
+        key={current.company.id + current.role}
+        source={source!}
+        role={current.role}
+        account={account}
+        cacheKey={`valetate.lot.${current.company.id}.${userId}`}
+      />
       {showTeam && (
-        <TeamDialog
-          companyId={current.company.id}
-          companyName={current.company.name}
-          me={session.user.id}
-          onClose={() => setShowTeam(false)}
-          onRolesChanged={refresh}
-        />
+        <Suspense fallback={null}>
+          <TeamDialog
+            companyId={current.company.id}
+            companyName={current.company.name}
+            me={session.user.id}
+            onClose={() => setShowTeam(false)}
+            onRolesChanged={refresh}
+          />
+        </Suspense>
       )}
     </>
   );

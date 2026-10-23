@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { DataSource } from '../data/source';
 import { buildReport, hourText, valetCsv, waitText, type ReportData } from '../report';
 import { dayStart, money } from '../shifts';
+import { useDialog } from '../dialog';
 
 type Range = 'today' | 'week' | 'month';
 const RANGES: { id: Range; label: string }[] = [
@@ -21,6 +22,7 @@ const hours = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}h ${String(M
 
 /** How the stand is doing: wait times, busy hours, who did what, and tips. Managers and admins. */
 export function Dashboard({ source, onClose }: { source: DataSource; onClose: () => void }) {
+  const dialog = useDialog(onClose);
   const [range, setRange] = useState<Range>('today');
   const [data, setData] = useState<ReportData | null>(null);
   const [error, setError] = useState('');
@@ -54,7 +56,7 @@ export function Dashboard({ source, onClose }: { source: DataSource; onClose: ()
 
   return (
     <div className="dialog-backdrop" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog dashboard" role="dialog" aria-label="Stand report">
+      <div className="dialog dashboard" {...dialog} aria-label="Stand report">
         <header>
           <h2>Stand report</h2>
           <div className="grow" />

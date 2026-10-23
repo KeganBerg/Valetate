@@ -3,6 +3,7 @@ import { listSpots } from '../geometry';
 import { TEMPLATES, type Template } from '../templates';
 import type { LotMap } from '../types';
 import { MapSvg } from './MapSvg';
+import { useDialog } from '../dialog';
 
 interface Props {
   maps: LotMap[];
@@ -20,6 +21,7 @@ function Thumb({ map }: { map: LotMap }) {
 }
 
 export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onImport, onClose, canEdit }: Props) {
+  const dialog = useDialog(onClose);
   const fileRef = useRef<HTMLInputElement>(null);
   const previews = useMemo(
     () => TEMPLATES.map((t) => ({ t, map: { ...t.build(), id: t.key, updatedAt: 0 } as LotMap })),
@@ -29,7 +31,7 @@ export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onIm
 
   return (
     <div className="dialog-backdrop" onPointerDown={(e) => e.target === e.currentTarget && onClose?.()}>
-      <div className="dialog" role="dialog" aria-label="Lot maps">
+      <div className="dialog" {...dialog} aria-label="Lot maps">
         <header>
           <h2>Lot maps</h2>
           <div className="grow" />
