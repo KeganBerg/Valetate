@@ -54,6 +54,12 @@ export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onIm
           )}
         </header>
 
+        {maps.length === 0 && canEdit && (
+          <p className="maps-intro">
+            Pick the map closest to your lot. You can move, add and renumber everything after.
+          </p>
+        )}
+
         {maps.length > 0 && (
           <section>
             <h3>Your maps</h3>
