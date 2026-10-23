@@ -1,5 +1,6 @@
 import { minutesOn, splitPool } from './shifts';
 import type { Feedback, Shift, Tip } from './types';
+import { summarize, type Payment, type PaymentSummary } from './payments';
 
 const HISTORY_KEY = 'valetate.history.v1';
 
@@ -40,6 +41,7 @@ export interface ReportData {
   people: Record<string, string>;
   /** guest ratings; left out where guests can't rate (single-device mode) */
   feedback?: Feedback[];
+  payments?: Payment[];
 }
 
 // ---------- single-device history ----------
@@ -108,6 +110,8 @@ export interface Report {
   shifts: number;
   /** tips per shift worked, cents */
   tipsPerShift: number | null;
+  /** null when nothing was paid in the range */
+  payments: PaymentSummary | null;
   /** null where guests can't rate */
   guests: {
     ratings: number;
@@ -230,6 +234,7 @@ export function buildReport(data: ReportData, from: number, to: number, now: num
     cashCents: tips.filter((t) => t.method === 'cash').reduce((s, t) => s + t.amountCents, 0),
     shifts: shifts.length,
     tipsPerShift: shifts.length ? Math.round(tipsCents / shifts.length) : null,
+    payments: (data.payments ?? []).some((p) => !p.voided && inRange(p.createdAt)) ? summarize(data.payments!, from, to) : null,
     guests: data.feedback
       ? {
           ratings: rated.length,
