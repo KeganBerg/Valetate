@@ -22,6 +22,7 @@ import { createPhotoQueue } from './photoQueue';
 import type { CarRequest, Incident, LotEvent, LotMap, MapItem, ParkedCar, Shift, Spot, Tip } from './types';
 import { almostFull, isPre, standPoint } from './surge';
 import { EventDialog, EventPill } from './components/EventMode';
+import { forgetPlate } from './components/GuestNote';
 import { dayStart, duration, money, splitPool } from './shifts';
 import { Loading } from './components/Loading';
 import { kindInfo } from './incidents';
@@ -334,6 +335,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
   useEffect(() => {
     refreshIncidents();
   }, [refreshIncidents]);
+  const lookupPlate = useCallback((plate: string) => source.lookupPlate(plate), [source]);
   const openIncidents = incidents.filter((i) => i.status === 'open').length;
   const refreshTeam = useCallback(async () => {
     const from = dayStart(Date.now());
@@ -672,6 +674,8 @@ export default function App({ source, role, account, initialMaps, initialCars, c
     setRequests((rs) => rs.filter((r) => r.carId !== car.id));
     const done = source.retrieveCar(car.id);
     run(done, putBack);
+    // this visit now counts toward the plate's history
+    if (car.plate) done.then(() => forgetPlate(car.plate), () => {});
     // a mis-tap at rush shouldn't lose a car: offer undo for a few seconds
     flash(`${carName(car)} retrieved from ${car.spotLabel}`, () => {
       putBack();
@@ -1089,7 +1093,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
                 ...(source.kind === 'cloud' ? { guestToken: newGuestToken() } : {}),
               };
               setCars((cs) => [...cs, car]);
-              run(source.parkCar(car), () => setCars((cs) => cs.filter((c) => c.id !== car.id)));
+              run(source.parkCar(car), () => setCars((cs) => cs.filter((c) => c.id !== car.id))).then(() => car.plate && forgetPlate(car.plate));
               setNow(Date.now());
               if (car.ticket) setLastTag(car.ticket);
               // jump to the next open spot so the next car is one tap away
@@ -1130,6 +1134,16 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             onGuestLink={source.kind === 'cloud' ? setGuestLinkCar : undefined}
             onPhotos={setPhotoCar}
             onIncident={(car) => setIncidentSheet({ car })}
+            lookupPlate={lookupPlate}
+            onSaveProfile={(prof) => {
+              source.saveVehicle(prof).then(
+                () => {
+                  forgetPlate(prof.plate);
+                  flash('Guest profile saved');
+                },
+                (e) => flash(friendlyError(e)),
+              );
+            }}
             onClaim={(r) => {
               patchRequest(r.id, { status: 'claimed', claimedBy: source.me.id, claimedByName: source.me.name, claimedAt: Date.now() });
               // whoever goes for the car takes its keys off the board

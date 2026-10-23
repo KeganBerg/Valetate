@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { CarDetails } from '../data/source';
 import { CAR_COLORS, CAR_MAKES, carMatches, colorHex, formatElapsed, nextOpenSpot } from '../ops';
-import type { CarRequest, LotEvent, ParkedCar, Spot } from '../types';
+import type { CarRequest, LotEvent, ParkedCar, PlateHistory, Spot, VehicleProfile } from '../types';
+import { fillFrom } from '../guests';
+import { GuestNote, ProfileDialog, usePlateHistory } from './GuestNote';
 import { EventCard } from './EventMode';
 import { carsWithKeysOut, hookTaken, keyHook, KEYS_LATE_MS } from '../keys';
 import { matchPlate } from '../plates';
@@ -36,6 +38,9 @@ interface Props extends RequestActions {
   onPhotos: (car: ParkedCar) => void;
   /** file an incident report about this car */
   onIncident: (car: ParkedCar) => void;
+  /** what the stand knows about a plate, and saving a guest profile */
+  lookupPlate: (plate: string) => Promise<PlateHistory | null>;
+  onSaveProfile: (profile: VehicleProfile) => void;
   spots: Spot[];
   /** cars on this map */
   cars: ParkedCar[];
@@ -186,6 +191,7 @@ export function LivePanel(p: Props) {
   const [pickBlocks, setPickBlocks] = useState(false);
   const tagRef = useRef<HTMLInputElement>(null);
   const set = (v: Partial<NewCar>) => setForm((f) => ({ ...f, ...v }));
+  const [profileFor, setProfileFor] = useState<{ plate: string; profile: VehicleProfile | null } | null>(null);
 
   // fresh form for each spot, with the next tag already filled in
   useEffect(() => {
@@ -204,6 +210,8 @@ export function LivePanel(p: Props) {
   const openSpot = nextOpenSpot(p.spots, taken, p.active?.key);
   const dupTag = !car && form.ticket.trim() && p.allCars.find((c) => c.ticket.trim() === form.ticket.trim());
   const dupPlate = !car && form.plate.trim() ? matchPlate(p.allCars, form.plate) : undefined;
+  const known = usePlateHistory(p.lookupPlate, car ? '' : form.plate);
+  const carKnown = usePlateHistory(p.lookupPlate, car?.plate ?? '');
   const dupHook = !car && form.keySlot?.trim() ? hookTaken(p.allCars, form.keySlot) : undefined;
   const keysOutList = carsWithKeysOut(p.allCars);
   const liveCarIds = new Set(p.requests.map((r) => r.carId));
@@ -312,6 +320,9 @@ export function LivePanel(p: Props) {
               {car.plate && <div className="plate-sm">{car.plate}</div>}
             </div>
           </div>
+          {car.plate && (
+            <GuestNote history={carKnown} onEdit={() => setProfileFor({ plate: car.plate, profile: carKnown?.profile ?? null })} />
+          )}
           <div className={`key-row ${car.keysWith ? 'out' : ''}`}>
             <span aria-hidden>🔑</span>
             <span className="key-where">
@@ -406,6 +417,9 @@ export function LivePanel(p: Props) {
               {car.plate && car.color && car.ownerName ? 'Edit details' : 'Add details'}
             </button>
             <button onClick={() => p.onIncident(car)}>Report incident</button>
+            {car.plate && !carKnown?.profile?.type && !carKnown?.profile?.prefs && (
+              <button onClick={() => setProfileFor({ plate: car.plate, profile: carKnown?.profile ?? null })}>Guest profile</button>
+            )}
           </div>
           {pickBlocks && (
             <div className="blocks-edit">
@@ -493,6 +507,15 @@ export function LivePanel(p: Props) {
                 + Plate, owner, notes
               </button>
             </div>
+          )}
+          {!dupPlate && (
+            <GuestNote
+              history={known}
+              onFill={() => {
+                if (known?.profile) set(fillFrom(form, known.profile));
+                setMore(true);
+              }}
+            />
           )}
           {dupHook && (
             <p className="warn">
@@ -613,6 +636,17 @@ export function LivePanel(p: Props) {
             onClose={() => setScan(null)}
           />
         </Suspense>
+      )}
+      {profileFor && (
+        <ProfileDialog
+          plate={profileFor.plate}
+          profile={profileFor.profile}
+          onClose={() => setProfileFor(null)}
+          onSave={(prof) => {
+            p.onSaveProfile(prof);
+            setProfileFor(null);
+          }}
+        />
       )}
     </aside>
   );

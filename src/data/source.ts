@@ -1,4 +1,4 @@
-import type { CarPhoto, CarRequest, Incident, LotEvent, LotMap, ParkedCar, PhotoSide, Shift, Tip } from '../types';
+import type { CarPhoto, CarRequest, Incident, LotEvent, PlateHistory, VehicleProfile, LotMap, ParkedCar, PhotoSide, Shift, Tip } from '../types';
 import type { Outbox } from './outbox';
 import type { ReportData } from '../report';
 
@@ -87,6 +87,10 @@ export interface DataSource {
   resolveIncident(id: string, resolution: string, reopen?: boolean): Promise<void>;
   /** something the browser can show for each of a report's photos */
   incidentPhotos(incident: Incident): Promise<string[]>;
+  /** what the stand knows about a plate (profile, past visits, damage, incidents); null if too short or offline */
+  lookupPlate(plate: string): Promise<PlateHistory | null>;
+  /** save a guest profile: monthly, hotel room, preferences… */
+  saveVehicle(profile: VehicleProfile): Promise<void>;
   /** cars, requests, tips and shifts since `since`, for the manager dashboard */
   reportData(since: number): Promise<ReportData>;
   /** put a car marked retrieved by mistake back on its spot */

@@ -7,6 +7,8 @@ import { deleteMap, loadMaps, saveMap } from '../storage';
 import type { DataSource } from './source';
 import { loadHistory, logHistory, type RequestVisit } from '../report';
 import { loadIncidents, recentIncidents, saveIncidents } from '../incidents';
+import { learnVehicle, loadVehicles, lookupKey, saveVehicle } from '../guests';
+import { plateKey } from '../plates';
 import type { CarRequest } from '../types';
 
 const visitOf = (r: CarRequest, status: RequestVisit['status']): RequestVisit => ({
@@ -37,10 +39,17 @@ export const localSource: DataSource = {
     saveRequests(loadRequests().filter((r) => r.mapId !== id));
   },
   listCars: async () => loadCars(),
-  parkCar: async (car) => saveCars([...loadCars(), car]),
+  parkCar: async (car) => {
+    saveCars([...loadCars(), car]);
+    learnVehicle(car);
+  },
   moveCar: async (id, spotKey, spotLabel) =>
     saveCars(loadCars().map((c) => (c.id === id ? { ...c, spotKey, spotLabel } : c))),
-  updateCar: async (id, patch) => saveCars(loadCars().map((c) => (c.id === id ? { ...c, ...patch } : c))),
+  updateCar: async (id, patch) => {
+    saveCars(loadCars().map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    const car = loadCars().find((c) => c.id === id);
+    if (car) learnVehicle(car);
+  },
   setKeys: async (id, out) =>
     saveCars(
       loadCars().map((c) =>
@@ -53,7 +62,7 @@ export const localSource: DataSource = {
     const car = loadCars().find((c) => c.id === id);
     if (car)
       logHistory({
-        cars: [{ id, mapId: car.mapId, parkedAt: car.parkedAt, retrievedAt: Date.now(), parkedBy: 'local', retrievedBy: 'local' }],
+        cars: [{ id, mapId: car.mapId, parkedAt: car.parkedAt, retrievedAt: Date.now(), parkedBy: 'local', retrievedBy: 'local', plate: car.plate }],
         requests: loadRequests()
           .filter((r) => r.carId === id)
           .map((r) => visitOf(r, 'done')),
@@ -86,6 +95,24 @@ export const localSource: DataSource = {
     if (r) logHistory({ requests: [visitOf(r, 'cancelled')] });
     saveRequests(loadRequests().filter((x) => x.id !== id));
   },
+  lookupPlate: async (plate) => {
+    const k = lookupKey(plate);
+    if (!k) return null;
+    const past = loadHistory().cars.filter((c) => c.plate && plateKey(c.plate) === k);
+    const ids = new Set(past.map((c) => c.id));
+    const incs = loadIncidents()
+      .filter((i) => i.carId && ids.has(i.carId))
+      .sort((a, b) => b.createdAt - a.createdAt);
+    return {
+      profile: loadVehicles()[k] ?? null,
+      pastVisits: past.length,
+      lastVisit: past.length ? Math.max(...past.map((c) => c.parkedAt)) : null,
+      damageVisits: 0,
+      incidents: incs.length,
+      lastIncident: incs[0] ? `${incs[0].kind}: ${incs[0].details.slice(0, 140)}` : '',
+    };
+  },
+  saveVehicle: async (p) => saveVehicle(p),
   listIncidents: async () => recentIncidents(loadIncidents(), Date.now()),
   reportIncident: async (inc, photos) => {
     for (const ph of photos)

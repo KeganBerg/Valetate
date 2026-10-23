@@ -198,3 +198,32 @@ export interface Incident {
   resolvedByName: string;
   resolution: string;
 }
+
+export type GuestType = '' | 'monthly' | 'hotel' | 'vip';
+
+/** What the stand knows about a plate: learned from check-ins, plus what a valet adds. */
+export interface VehicleProfile {
+  plate: string;
+  ownerName: string;
+  ownerPhone: string;
+  color: string;
+  make: string;
+  vehicle: string;
+  type: GuestType;
+  /** hotel room or resident's unit */
+  unit: string;
+  /** monthly paid through, "YYYY-MM-DD", or '' */
+  paidUntil: string;
+  /** how they like it: "seat stays back" */
+  prefs: string;
+}
+
+export interface PlateHistory {
+  profile: VehicleProfile | null;
+  pastVisits: number;
+  lastVisit: number | null;
+  /** past visits with a photo marked as damage */
+  damageVisits: number;
+  incidents: number;
+  lastIncident: string;
+}
