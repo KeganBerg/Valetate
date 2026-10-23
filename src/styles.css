@@ -688,6 +688,11 @@ button.link {
   color: var(--accent);
   font-weight: 600;
 }
+button.link.forgot {
+  align-self: flex-end;
+  margin-top: -6px;
+  font-size: 13px;
+}
 button.wide {
   width: 100%;
   padding: 10px;
