@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildReport, hourText, valetCsv, waitOf, waitText, type CarVisit, type RequestVisit } from './report';
-import type { Shift, Tip } from './types';
+import type { Feedback, Shift, Tip } from './types';
 
 const M = 60 * 1000;
 const H = 60 * M;
@@ -82,5 +82,38 @@ describe('manager report', () => {
     expect(waitText(null)).toBe('–');
     expect(hourText(0)).toBe('12 AM');
     expect(hourText(21)).toBe('9 PM');
+  });
+
+  it('adds up guest ratings overall and per valet', () => {
+    const fb = (id: string, rating: number, createdAt: number, valetId = 'b', comment = ''): Feedback => ({
+      id,
+      carId: id,
+      ticket: id,
+      rating,
+      comment,
+      valetId,
+      valetName: valetId.toUpperCase(),
+      createdAt,
+    });
+    const data = {
+      cars: [],
+      requests: [],
+      tips: [],
+      shifts: [],
+      people: { b: 'Bea', c: 'Cy' },
+      feedback: [fb('1', 5, at(20)), fb('2', 4, at(21), 'b', 'Quick!'), fb('3', 2, at(21, 30), 'c'), fb('4', 1, at(-5))],
+    };
+    const r = buildReport(data, at(0), at(24), at(23));
+    expect(r.guests!.ratings).toBe(3);
+    expect(r.guests!.avg).toBeCloseTo(11 / 3);
+    expect(r.guests!.stars).toEqual([0, 1, 0, 1, 1]);
+    // comments and low ratings, newest first
+    expect(r.guests!.said.map((f) => f.id)).toEqual(['3', '2']);
+    const bea = r.valets.find((v) => v.userId === 'b')!;
+    expect(bea.rating).toBe(4.5);
+    expect(bea.ratings).toBe(2);
+    expect(valetCsv(r)).toContain('Bea,0,0,,0.00,0.00,4.5,2');
+    // where guests can't rate, there's no section at all
+    expect(buildReport({ ...data, feedback: undefined }, at(0), at(24), at(23)).guests).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { CarPhoto, CarRequest, Incident, LotMap, PlateHistory, MapItem, ParkedCar, PhotoSide } from '../types';
+import type { CarPhoto, CarRequest, Feedback, Incident, LotMap, PlateHistory, MapItem, ParkedCar, PhotoSide } from '../types';
 import { MapConflict, type CarDetails, type DataSource, type Role } from './source';
 import type { RequestVisit } from '../report';
 import { lookupKey } from '../guests';
@@ -20,6 +20,27 @@ function check<T>(res: { data: T; error: { message: string } | null }): T {
   if (res.error) throw new Error(res.error.message);
   return res.data;
 }
+
+interface FeedbackRow {
+  id: string;
+  car_id: string | null;
+  ticket: string;
+  rating: number;
+  comment: string;
+  valet_id: string | null;
+  valet_name: string;
+  created_at: string;
+}
+const feedbackOf = (r: FeedbackRow): Feedback => ({
+  id: r.id,
+  carId: r.car_id,
+  ticket: r.ticket,
+  rating: r.rating,
+  comment: r.comment,
+  valetId: r.valet_id ?? '',
+  valetName: r.valet_name,
+  createdAt: Date.parse(r.created_at),
+});
 
 export interface Company {
   id: string;
@@ -713,7 +734,7 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         closed_at: string | null;
       };
       const ms = (t: string | null) => (t ? Date.parse(t) : null);
-      const [cars, reqs, tips, shifts, people] = await Promise.all([
+      const [cars, reqs, tips, shifts, people, feedback] = await Promise.all([
         all<CarRow>((a, b) =>
           db()
             .from('parked_cars')
@@ -735,6 +756,9 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         this.listTips(since),
         this.listShifts(since),
         team.members(companyId).catch(() => [] as Member[]),
+        all<FeedbackRow>((a, b) =>
+          db().from('feedback').select('*').eq('company_id', companyId).gte('created_at', iso).order('created_at').range(a, b),
+        ),
       ]);
       return {
         cars: cars.map((c) => ({
@@ -761,6 +785,7 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         tips,
         shifts,
         people: Object.fromEntries(people.map((m) => [m.user_id, m.display_name || m.email.split('@')[0]])),
+        feedback: feedback.map(feedbackOf),
       };
     },
     async unretrieveCar(car) {
@@ -814,6 +839,9 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts', filter: `company_id=eq.${companyId}` }, () => on.team?.())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tips', filter: `company_id=eq.${companyId}` }, () => on.team?.())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents', filter: `company_id=eq.${companyId}` }, () => on.incidents?.())
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'feedback', filter: `company_id=eq.${companyId}` }, (p) =>
+          on.feedback?.(feedbackOf(p.new as FeedbackRow)),
+        )
         .subscribe((status) => {
           // changes made while disconnected are not replayed, so reload after every (re)join
           if (status === 'SUBSCRIBED') {
