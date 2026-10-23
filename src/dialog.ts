@@ -12,6 +12,19 @@ interface Layer {
 }
 const layers: Layer[] = [];
 let skipPops = 0;
+// entries of closed layers, removed together a moment later; a layer opened
+// meanwhile (React's dev double-run, or one dialog swapped for another) takes
+// one over instead, so history never goes back past the app
+let pendingBacks = 0;
+let backTimer: ReturnType<typeof setTimeout> | undefined;
+function flushBacks() {
+  backTimer = undefined;
+  if (!pendingBacks) return;
+  const n = pendingBacks;
+  pendingBacks = 0;
+  skipPops++;
+  history.go(-n);
+}
 
 if (typeof window !== 'undefined') {
   window.addEventListener('popstate', () => {
@@ -36,14 +49,15 @@ export function useBackToClose(open: boolean, onClose: (() => void) | undefined)
     if (!closable) return;
     const layer: Layer = { close: () => closeRef.current?.(), popped: false };
     layers.push(layer);
-    history.pushState({ valetateLayer: layers.length }, '');
+    if (pendingBacks > 0) pendingBacks--;
+    else history.pushState({ valetateLayer: layers.length }, '');
     return () => {
       if (layer.popped) return;
       // closed with a button, Escape or a tap outside: drop the entry it added
       const i = layers.indexOf(layer);
       if (i >= 0) layers.splice(i, 1);
-      skipPops++;
-      history.back();
+      pendingBacks++;
+      backTimer ??= setTimeout(flushBacks, 0);
     };
   }, [closable]);
 }
