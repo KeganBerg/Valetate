@@ -1,7 +1,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { CarPhoto, CarRequest, Incident, LotMap, MapItem, ParkedCar, PhotoSide } from '../types';
+import type { CarPhoto, CarRequest, Incident, LotMap, PlateHistory, MapItem, ParkedCar, PhotoSide } from '../types';
 import { MapConflict, type CarDetails, type DataSource, type Role } from './source';
 import type { RequestVisit } from '../report';
+import { lookupKey } from '../guests';
+import { plateKey } from '../plates';
+import type { VehicleProfile } from '../types';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
@@ -166,6 +169,26 @@ interface PhotoRow {
 }
 
 const BUCKET = 'car-photos';
+
+interface VehicleLookup {
+  profile: {
+    plate: string;
+    owner_name: string;
+    owner_phone: string;
+    color: string;
+    make: string;
+    vehicle: string;
+    guest_type: VehicleProfile['type'];
+    unit: string;
+    paid_until: string | null;
+    prefs: string;
+  } | null;
+  past_visits: number;
+  last_visit: string | null;
+  damage_visits: number;
+  incidents: number;
+  last_incident: string | null;
+}
 
 interface IncidentRow {
   id: string;
@@ -567,6 +590,56 @@ export function cloudSource(companyId: string, userId: string, userName: string)
     },
     async setTipUrl(url) {
       check(await db().from('companies').update({ tip_url: url }).eq('id', companyId));
+    },
+    async lookupPlate(plate) {
+      if (!lookupKey(plate)) return null;
+      const r = check(await db().rpc('vehicle_lookup', { company: companyId, plate })) as VehicleLookup | null;
+      if (!r) return null;
+      const v = r.profile;
+      return {
+        profile: v
+          ? {
+              plate: v.plate,
+              ownerName: v.owner_name,
+              ownerPhone: v.owner_phone,
+              color: v.color,
+              make: v.make,
+              vehicle: v.vehicle,
+              type: v.guest_type,
+              unit: v.unit,
+              paidUntil: v.paid_until ?? '',
+              prefs: v.prefs,
+            }
+          : null,
+        pastVisits: r.past_visits,
+        lastVisit: r.last_visit ? Date.parse(r.last_visit) : null,
+        damageVisits: r.damage_visits,
+        incidents: r.incidents,
+        lastIncident: r.last_incident ?? '',
+      } satisfies PlateHistory;
+    },
+    async saveVehicle(p) {
+      const key = plateKey(p.plate);
+      if (key.length < 2) return;
+      check(
+        await db()
+          .from('vehicles')
+          .upsert({
+            company_id: companyId,
+            plate_key: key,
+            plate: p.plate.toUpperCase().slice(0, 20),
+            owner_name: p.ownerName,
+            owner_phone: p.ownerPhone,
+            color: p.color,
+            make: p.make,
+            vehicle: p.vehicle,
+            guest_type: p.type,
+            unit: p.unit,
+            paid_until: p.paidUntil || null,
+            prefs: p.prefs,
+            updated_at: new Date().toISOString(),
+          }),
+      );
     },
     async listIncidents() {
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();

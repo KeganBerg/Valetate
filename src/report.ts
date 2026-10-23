@@ -11,6 +11,8 @@ export interface CarVisit {
   retrievedAt: number | null;
   parkedBy: string;
   retrievedBy: string;
+  /** single-device history only, for spotting repeat guests */
+  plate?: string;
 }
 
 /** One retrieval request, start to finish. */
