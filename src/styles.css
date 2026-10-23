@@ -2808,3 +2808,28 @@ button:active:not(:disabled) {
     transform: none;
   }
 }
+
+/* ---------- one-handed phone use: live lot controls sit by the thumb ---------- */
+@media (max-width: 820px) {
+  .app.mode-live .mobile-tabs {
+    right: 80px;
+    align-items: center;
+  }
+  .mobile-tabs .find {
+    flex: 1;
+    min-width: 0;
+  }
+  .mobile-tabs .find input {
+    width: 100%;
+    min-height: 44px;
+    background: var(--panel);
+    border-radius: 10px;
+    box-shadow: 0 6px 20px #0006;
+  }
+  .app.mode-live .zoom button:not(.zoom-fit) {
+    display: none;
+  }
+  .app.mode-live .zoom-fit {
+    min-width: 60px;
+  }
+}
