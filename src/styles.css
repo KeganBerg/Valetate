@@ -2538,14 +2538,14 @@ table.crew tbody tr:last-child td {
   align-items: flex-start;
   gap: 8px;
 }
-.getting-started header > div {
+.getting-started .gs-toggle {
   flex: 1;
 }
-.getting-started h2 {
+.getting-started .gs-title {
   margin: 0;
   font-size: 16px;
 }
-.getting-started header p {
+.getting-started .gs-sub {
   margin: 2px 0 0;
 }
 .getting-started .progress {
@@ -2672,4 +2672,28 @@ table.crew tbody tr:last-child td {
     animation: none;
     transition: none;
   }
+}
+.getting-started .gs-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  min-height: 44px;
+  justify-content: center;
+  color: inherit;
+}
+.getting-started .gs-title {
+  font-weight: 700;
+}
+.getting-started .gs-sub {
+  display: block;
+}
+.getting-started.collapsed {
+  padding-bottom: 8px;
+}
+.getting-started.collapsed .progress {
+  margin-bottom: 0;
 }

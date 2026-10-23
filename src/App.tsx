@@ -984,7 +984,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
                   label: 'Park your first car',
                   hint: 'On the live lot, tap an open spot.',
                   done: !!setup.parked,
-                  action: { label: 'Live lot', run: () => setMode('live') },
+                  action: mode === 'live' ? undefined : { label: 'Live lot', run: () => setMode('live') },
                 },
               ]}
             />
