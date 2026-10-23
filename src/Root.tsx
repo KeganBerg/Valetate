@@ -19,6 +19,7 @@ import {
   type Membership,
 } from './data/supabase';
 import type { LotMap, ParkedCar } from './types';
+import { Loading } from './components/Loading';
 
 // opened now and then: loaded the first time they're needed
 const TeamDialog = lazy(() => import('./components/TeamDialog').then((m) => ({ default: m.TeamDialog })));
@@ -54,7 +55,8 @@ function Splash({ text = 'Loading…' }: { text?: string }) {
     <div className="screen">
       <div className="screen-card center">
         <span className="logo big">V</span>
-        <p className="muted">{text}</p>
+        <span className="spinner" aria-hidden="true" />
+        <p className="muted" role="status">{text}</p>
       </div>
     </div>
   );
@@ -574,7 +576,7 @@ function Cloud() {
         cacheKey={`valetate.lot.${current.company.id}.${userId}`}
       />
       {showTeam && (
-        <Suspense fallback={null}>
+        <Suspense fallback={<Loading />}>
           <TeamDialog
             companyId={current.company.id}
             companyName={current.company.name}

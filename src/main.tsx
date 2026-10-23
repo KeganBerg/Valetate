@@ -1,6 +1,7 @@
 import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
+import { Loading } from './components/Loading';
 
 // a guest's link (?car=…) gets only the small request page, not the whole app
 const guestToken = new URLSearchParams(location.search).get('car');
@@ -10,11 +11,11 @@ const Root = lazy(() => import('./Root'));
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {guestToken ? (
-      <Suspense fallback={null}>
+      <Suspense fallback={<Loading />}>
         <GuestPage token={guestToken} />
       </Suspense>
     ) : (
-      <Suspense fallback={null}>
+      <Suspense fallback={<Loading />}>
         <Root />
       </Suspense>
     )}
