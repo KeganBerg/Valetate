@@ -12,13 +12,14 @@ interface Props {
   onDelete: (map: LotMap) => void;
   onImport: (file: File) => void;
   onClose?: () => void;
+  canEdit: boolean;
 }
 
 function Thumb({ map }: { map: LotMap }) {
   return <MapSvg map={map} className="thumb" />;
 }
 
-export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onImport, onClose }: Props) {
+export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onImport, onClose, canEdit }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const previews = useMemo(
     () => TEMPLATES.map((t) => ({ t, map: { ...t.build(), id: t.key, updatedAt: 0 } as LotMap })),
@@ -32,7 +33,7 @@ export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onIm
         <header>
           <h2>Lot maps</h2>
           <div className="grow" />
-          <button onClick={() => fileRef.current?.click()}>Import file…</button>
+          {canEdit && <button onClick={() => fileRef.current?.click()}>Import file…</button>}
           <input
             ref={fileRef}
             type="file"
@@ -64,7 +65,7 @@ export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onIm
                       {listSpots(m.items).length} spots · edited {new Date(m.updatedAt).toLocaleDateString()}
                     </small>
                   </button>
-                  <button
+                  {canEdit && <button
                     className="icon del"
                     aria-label={`Delete ${m.name}`}
                     onClick={() => {
@@ -72,14 +73,14 @@ export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onIm
                     }}
                   >
                     🗑
-                  </button>
+                  </button>}
                 </div>
               ))}
             </div>
           </section>
         )}
 
-        {groups.map((g) => (
+        {canEdit && groups.map((g) => (
           <section key={g}>
             <h3>{g === 'Start from' ? 'New map' : 'Examples from real venues'}</h3>
             <div className="cards">

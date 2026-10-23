@@ -15,7 +15,21 @@ All-in-one valet operations app. This first piece is the **lot map editor**, plu
 - **Maps**: you can keep several maps, start from templates (blank, surface lot, garage level), or open examples recreated from real venue maps (Broward Center back lot and front ramp, WPB Marriott). Maps can be imported and exported as files, and saved as PNG or SVG.
 - Works on phones: pinch to zoom, and the panels open as bottom sheets.
 
-Data is currently saved in the browser (localStorage). Accounts, roles, and shared live data are coming next, using Supabase.
+## Accounts, roles, and live data (Supabase)
+
+When `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` are set (see `.env`), Valetate requires sign-in, and everything is shared across a company in real time:
+
+- **Admin**: invites people by email, sets roles, removes members, builds maps, parks cars.
+- **Manager**: builds and edits maps, parks cars.
+- **Valet**: sees the live lot (taken spots, time parked, plate, owner info), parks, moves, and retrieves cars.
+
+The first person to sign up creates the company and becomes its admin. Invited people join automatically the first time they sign in with the invited email. Access is enforced in the database with row-level security (`supabase/migrations/`), not just in the UI. A company always keeps at least one admin, and a spot can only hold one parked car.
+
+Without those variables, the app runs in single-device mode and saves to the browser's localStorage.
+
+### Before going live
+
+In the Supabase dashboard, open Authentication → URL Configuration and set **Site URL** to wherever the app is hosted, so confirmation and sign-in emails link back to it.
 
 ## Data model
 

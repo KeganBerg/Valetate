@@ -7,14 +7,13 @@ import { MapsDialog } from './components/MapsDialog';
 import { Palette } from './components/Palette';
 import { exportJson, exportPng, exportSvg, parseMapFile } from './export';
 import { GRID, duplicateSpotLabels, findSpot, listSpots, snap, uid } from './geometry';
-import { loadCars, saveCars } from './ops';
-import { currentMapId, deleteMap, loadMaps, saveMap } from './storage';
+import { canEditMaps, ROLE_INFO, type DataSource, type Role } from './data/source';
+import { currentMapId, setCurrentMapId } from './storage';
 import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
 import type { LotMap, MapItem, ParkedCar, Spot } from './types';
 
-function initialMap(): { map: LotMap; firstRun: boolean } {
-  const maps = loadMaps();
+function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean } {
   const id = currentMapId();
   const found = maps.find((m) => m.id === id) ?? maps[0];
   if (found) return { map: found, firstRun: false };
@@ -36,26 +35,50 @@ function nextSpaceNumber(items: MapItem[]): string {
   return String(nums.length ? Math.max(...nums) + 1 : 1);
 }
 
+function initials(name: string) {
+  const parts = name.trim().split(/[\s@._-]+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? '?') + (parts[1]?.[0] ?? '')).toUpperCase();
+}
+
 const isTyping = (e: KeyboardEvent) => {
   const t = e.target as HTMLElement;
   return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable;
 };
 
-export default function App() {
-  const init = useMemo(initialMap, []);
+export interface Account {
+  name: string;
+  email: string;
+  companyName: string;
+  onSignOut: () => void;
+  onTeam?: () => void;
+  onSwitchCompany?: () => void;
+}
+
+interface Props {
+  source: DataSource;
+  role: Role;
+  account?: Account;
+  initialMaps: LotMap[];
+  initialCars: ParkedCar[];
+}
+
+export default function App({ source, role, account, initialMaps, initialCars }: Props) {
+  const canEdit = canEditMaps(role);
+  const init = useMemo(() => initialMap(initialMaps), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [state, dispatch] = useReducer(reducer, init.map, initState);
   const { map, selected } = state;
-  const [maps, setMaps] = useState<LotMap[]>(loadMaps);
-  const [showMaps, setShowMaps] = useState(init.firstRun);
+  const [maps, setMaps] = useState<LotMap[]>(initialMaps);
+  const [showMaps, setShowMaps] = useState(init.firstRun && canEdit);
   const [view, setView] = useState<View>({ x: 40, y: 40, z: 0.6 });
   const [snapOn, setSnapOn] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
-  const [mode, setMode] = useState<'edit' | 'live'>('edit');
+  const [mode, setMode] = useState<'edit' | 'live'>(canEdit ? 'edit' : 'live');
+  const [saving, setSaving] = useState<'saved' | 'saving' | 'error'>('saved');
   const [panel, setPanel] = useState<'none' | 'palette' | 'inspector'>('none');
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState<Spot | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [cars, setCars] = useState<ParkedCar[]>(loadCars);
+  const [cars, setCars] = useState<ParkedCar[]>(initialCars);
   const [activeSpotKey, setActiveSpotKey] = useState<string | null>(null);
   const [moving, setMoving] = useState<ParkedCar | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -74,17 +97,70 @@ export default function App() {
     window.setTimeout(() => setToast((t) => (t === msg ? null : t)), 2600);
   }, []);
 
+  const upsertMapInList = (m: LotMap) => setMaps((ms) => [m, ...ms.filter((x) => x.id !== m.id)]);
+
+  const persistMap = useCallback(
+    async (m: LotMap) => {
+      setSaving('saving');
+      try {
+        await source.saveMap(m);
+        setSaving('saved');
+      } catch (e) {
+        setSaving('error');
+        flash(`Couldn't save: ${e instanceof Error ? e.message : e}`);
+      }
+    },
+    [source, flash],
+  );
+
   // autosave (skip the untouched map we just loaded)
   useEffect(() => {
-    if (state.map === loadedRef.current) return;
-    const t = window.setTimeout(() => {
-      saveMap(state.map);
-      setMaps(loadMaps());
-    }, 300);
+    if (state.map === loadedRef.current || !canEdit) return;
+    upsertMapInList(state.map);
+    const t = window.setTimeout(() => persistMap(state.map), source.kind === 'cloud' ? 700 : 300);
     return () => window.clearTimeout(t);
-  }, [state.map]);
+  }, [state.map]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => saveCars(cars), [cars]);
+  useEffect(() => setCurrentMapId(map.id), [map.id]);
+
+  const refreshCars = useCallback(async () => {
+    try {
+      setCars(await source.listCars());
+    } catch {
+      // keep what we have; the next change will retry
+    }
+  }, [source]);
+
+  // live updates from other devices
+  const mapRef = useRef(map);
+  mapRef.current = map;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  useEffect(
+    () =>
+      source.subscribe({
+        cars: refreshCars,
+        maps: async () => {
+          const ms = await source.listMaps().catch(() => null);
+          if (!ms) return;
+          setMaps(ms);
+          // someone else changed the map we're looking at: follow along unless we're editing it
+          const cur = ms.find((m) => m.id === mapRef.current.id);
+          if (cur && cur.updatedAt > mapRef.current.updatedAt && modeRef.current === 'live') {
+            loadedRef.current = cur;
+            dispatch({ type: 'load', map: cur });
+          }
+        },
+      }),
+    [source, refreshCars],
+  );
+
+  const run = (p: Promise<unknown>, undo?: () => void) =>
+    p.catch((e) => {
+      flash(e instanceof Error ? e.message : String(e));
+      undo?.();
+      refreshCars();
+    });
 
   useEffect(() => {
     if (mode !== 'live') return;
@@ -112,8 +188,8 @@ export default function App() {
     setActiveSpotKey(null);
     setMoving(null);
     if (persist) {
-      saveMap(m);
-      setMaps(loadMaps());
+      upsertMapInList(m);
+      persistMap(m);
     }
   };
 
@@ -204,6 +280,7 @@ export default function App() {
     if (moving && s) {
       if (occupied.has(s.key)) return flash(`Spot ${s.label} is taken`);
       setCars((cs) => cs.map((c) => (c.id === moving.id ? { ...c, spotKey: s.key, spotLabel: s.label } : c)));
+      run(source.moveCar(moving.id, s.key, s.label));
       flash(`${moving.plate} moved to ${s.label}`);
       setMoving(null);
       setActiveSpotKey(s.key);
@@ -285,20 +362,22 @@ export default function App() {
         <button className="map-name" onClick={() => setShowMaps(true)} title="Switch map">
           {map.name || 'Untitled lot'} <span className="caret">▾</span>
         </button>
-        <div className="seg" role="tablist">
-          <button className={mode === 'edit' ? 'on' : ''} onClick={() => setMode('edit')}>
-            Edit map
-          </button>
-          <button
-            className={mode === 'live' ? 'on' : ''}
-            onClick={() => {
-              setMode('live');
-              dispatch({ type: 'select', ids: [] });
-            }}
-          >
-            Live lot
-          </button>
-        </div>
+        {canEdit && (
+          <div className="seg" role="tablist">
+            <button className={mode === 'edit' ? 'on' : ''} onClick={() => setMode('edit')}>
+              Edit map
+            </button>
+            <button
+              className={mode === 'live' ? 'on' : ''}
+              onClick={() => {
+                setMode('live');
+                dispatch({ type: 'select', ids: [] });
+              }}
+            >
+              Live lot
+            </button>
+          </div>
+        )}
         <form
           className="find"
           onSubmit={(e) => {
@@ -325,12 +404,37 @@ export default function App() {
             </button>
           </div>
         )}
+        {canEdit && mode === 'edit' && (
+          <span className={`save-state ${saving}`} title={source.kind === 'cloud' ? 'Saved for your whole team' : 'Saved on this device'}>
+            {saving === 'saving' ? 'Saving…' : saving === 'error' ? 'Not saved' : 'Saved'}
+          </span>
+        )}
         <details className="menu">
-          <summary>Export</summary>
+          <summary aria-label="Menu">
+            {account ? <span className="avatar">{initials(account.name || account.email)}</span> : 'Export'}
+          </summary>
           <div className="menu-list" onClick={(e) => (e.currentTarget.parentElement as HTMLDetailsElement).removeAttribute('open')}>
-            <button onClick={() => exportPng(map).catch((e) => flash(e.message))}>Image (PNG)</button>
-            <button onClick={() => exportSvg(map)}>Vector (SVG)</button>
-            <button onClick={() => exportJson(map)}>Map file (to share or back up)</button>
+            {account && (
+              <div className="menu-who">
+                <b>{account.name}</b>
+                <small>{account.email}</small>
+                <small>
+                  {account.companyName} · <span className={`role role-${role}`}>{ROLE_INFO[role].name}</span>
+                </small>
+              </div>
+            )}
+            {account?.onTeam && <button onClick={account.onTeam}>Team and roles</button>}
+            {account?.onSwitchCompany && <button onClick={account.onSwitchCompany}>Switch company</button>}
+            {account && <hr />}
+            <button onClick={() => exportPng(map).catch((e) => flash(e.message))}>Save map as image (PNG)</button>
+            <button onClick={() => exportSvg(map)}>Save map as vector (SVG)</button>
+            <button onClick={() => exportJson(map)}>Export map file</button>
+            {account && (
+              <>
+                <hr />
+                <button onClick={account.onSignOut}>Sign out</button>
+              </>
+            )}
           </div>
         </details>
       </header>
@@ -414,11 +518,13 @@ export default function App() {
                 parkedAt: Date.now(),
               };
               setCars((cs) => [...cs, car]);
+              run(source.parkCar(car), () => setCars((cs) => cs.filter((c) => c.id !== car.id)));
               setNow(Date.now());
               flash(`${car.plate} parked in ${spot.label}`);
             }}
             onRetrieve={(car) => {
               setCars((cs) => cs.filter((c) => c.id !== car.id));
+              run(source.retrieveCar(car.id));
               flash(`${car.plate} retrieved from ${car.spotLabel}`);
             }}
             onStartMove={setMoving}
@@ -436,10 +542,11 @@ export default function App() {
           currentId={map.id}
           onOpen={(m) => load(m, false)}
           onTemplate={(t: Template) => load(instantiate(t), true)}
+          canEdit={canEdit}
           onDelete={(m) => {
-            deleteMap(m.id);
+            run(source.deleteMap(m.id));
             setCars((cs) => cs.filter((c) => c.mapId !== m.id));
-            const rest = loadMaps();
+            const rest = maps.filter((x) => x.id !== m.id);
             setMaps(rest);
             if (m.id === map.id) load(rest[0] ?? instantiate(TEMPLATES[0]), false);
           }}

@@ -38,6 +38,10 @@ export function deleteMap(id: string) {
   );
 }
 
+export function setCurrentMapId(id: string) {
+  write(CURRENT_KEY, id);
+}
+
 export function currentMapId(): string | null {
   return read<string | null>(CURRENT_KEY, null);
 }
