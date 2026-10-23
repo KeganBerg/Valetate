@@ -57,6 +57,8 @@ export interface LotMap {
   surface: string;
   items: MapItem[];
   updatedAt: number;
+  /** goes up on every shared save; absent until the map is saved to a company */
+  version?: number;
 }
 
 /**

@@ -7,7 +7,7 @@ import { MapsDialog } from './components/MapsDialog';
 import { Palette } from './components/Palette';
 import { exportJson, exportPng, exportSvg, parseMapFile } from './export';
 import { GRID, duplicateSpotLabels, findSpot, listSpots, lotAround, snap, uid, unionBounds } from './geometry';
-import { canEditMaps, ROLE_INFO, type DataSource, type Role } from './data/source';
+import { canEditMaps, MapConflict, ROLE_INFO, type DataSource, type Role } from './data/source';
 import { findCar, friendlyError, nextOpenSpot, nextTag } from './ops';
 import { keyHook } from './keys';
 import { blockersOf, blocksAfterMove } from './stacks';
@@ -109,7 +109,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   const [panel, setPanel] = useState<'none' | 'palette' | 'inspector'>('none');
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState<Spot | null>(null);
-  const [toast, setToast] = useState<{ msg: string; undo?: () => void } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; undo?: () => void; label?: string } | null>(null);
   const [live, setLive] = useState(true);
   const [unsynced, setUnsynced] = useState(() => source.outbox?.count() ?? 0);
   // a change normally syncs in a blink; only mention it once it has been waiting a moment
@@ -143,24 +143,67 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   }, [mapCars, spots]);
   const activeSpot = spots.find((s) => s.key === activeSpotKey) ?? null;
 
-  const flash = useCallback((msg: string, undo?: () => void) => {
-    const t = { msg, undo };
+  const flash = useCallback((msg: string, undo?: () => void, label?: string) => {
+    const t = { msg, undo, label };
     setToast(t);
-    window.setTimeout(() => setToast((cur) => (cur === t ? null : cur)), undo ? 6000 : 2600);
+    // a decision (not just an undo) stays up long enough to read and choose
+    window.setTimeout(() => setToast((cur) => (cur === t ? null : cur)), label ? 12000 : undo ? 6000 : 2600);
   }, []);
 
   const upsertMapInList = (m: LotMap) => setMaps((ms) => [m, ...ms.filter((x) => x.id !== m.id)]);
 
+  // the version of each map this device last saw on the server; saves go over it
+  const versions = useRef(new Map<string, number>(init.map.version === undefined ? [] : [[init.map.id, init.map.version]]));
+  const noteVersion = (m: LotMap) => {
+    if (m.version !== undefined) versions.current.set(m.id, m.version);
+  };
+  // one save at a time, so each starts from the version the last one got back
+  const saveChain = useRef(Promise.resolve());
+  // bumped on a conflict: saves queued before it would overwrite the version just shown
+  const conflicts = useRef(0);
+  const lastSaved = useRef<LotMap | null>(null);
   const persistMap = useCallback(
-    async (m: LotMap) => {
+    (m: LotMap) => {
       setSaving('saving');
-      try {
-        await source.saveMap(m);
-        setSaving('saved');
-      } catch (e) {
-        setSaving('error');
-        flash(`Couldn't save: ${e instanceof Error ? e.message : e}`);
-      }
+      lastSaved.current = m;
+      const gen = conflicts.current;
+      saveChain.current = saveChain.current.then(async () => {
+        if (gen !== conflicts.current) return;
+        try {
+          const v = await source.saveMap(m, versions.current.get(m.id));
+          if (v !== undefined) versions.current.set(m.id, v);
+          setSaving('saved');
+        } catch (e) {
+          if (!(e instanceof MapConflict)) {
+            setSaving('error');
+            flash(`Couldn't save: ${e instanceof Error ? e.message : e}`);
+            return;
+          }
+          setSaving('saved');
+          conflicts.current++;
+          const theirs = e.theirs;
+          // my newest edit of this map, including any queued behind this save
+          const mine = lastSaved.current?.id === m.id ? lastSaved.current : m;
+          const keepMine = () => {
+            if (theirs) versions.current.set(m.id, theirs.version!);
+            else versions.current.delete(m.id);
+            loadRef.current({ ...mine, updatedAt: Date.now() }, true);
+          };
+          if (!theirs) {
+            versions.current.delete(m.id);
+            flash(`“${m.name}” was deleted on another device.`, keepMine, 'Restore it');
+            return;
+          }
+          // show their version; one tap puts mine back over it
+          versions.current.set(m.id, theirs.version!);
+          setMaps((ms) => ms.map((x) => (x.id === theirs.id ? theirs : x)));
+          if (mapRef.current.id === m.id) {
+            loadedRef.current = theirs;
+            dispatch({ type: 'load', map: theirs });
+          }
+          flash('Someone else changed this map at the same time. Showing their version.', keepMine, 'Keep mine');
+        }
+      });
     },
     [source, flash],
   );
@@ -245,6 +288,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
           const cur = ms.find((m) => m.id === mapRef.current.id);
           if (cur && cur.updatedAt > mapRef.current.updatedAt && modeRef.current === 'live') {
             loadedRef.current = cur;
+            noteVersion(cur);
             dispatch({ type: 'load', map: cur });
           }
         },
@@ -355,6 +399,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
 
   const load = (m: LotMap, persist: boolean) => {
     loadedRef.current = persist ? (null as unknown as LotMap) : m;
+    if (!persist) noteVersion(m);
     dispatch({ type: 'load', map: m });
     setShowMaps(false);
     setHighlight(null);
@@ -365,6 +410,8 @@ export default function App({ source, role, account, initialMaps, initialCars }:
       persistMap(m);
     }
   };
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
   // the lot grows to hold anything added or moved past its edge
   const commit = (items: MapItem[], opts: { key?: string; select?: string[] } = {}) => {
@@ -772,7 +819,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
                     undo();
                   }}
                 >
-                  Undo
+                  {toast.label ?? 'Undo'}
                 </button>
               )}
             </div>

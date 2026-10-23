@@ -8,7 +8,10 @@ import type { DataSource } from './source';
 export const localSource: DataSource = {
   kind: 'local',
   listMaps: async () => loadMaps(),
-  saveMap: async (m) => saveMap(m),
+  saveMap: async (m) => {
+    saveMap(m);
+    return undefined;
+  },
   deleteMap: async (id) => {
     deleteMap(id);
     saveCars(loadCars().filter((c) => c.mapId !== id));
