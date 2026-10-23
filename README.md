@@ -15,6 +15,10 @@ All-in-one valet operations app. This first piece is the **lot map editor**, plu
 - **Maps**: you can keep several maps, start from templates (blank, surface lot, garage level), or open examples recreated from real venue maps (Broward Center back lot and front ramp, WPB Marriott). Maps can be imported and exported as files, and saved as PNG or SVG.
 - Works on phones: pinch to zoom, and the panels open as bottom sheets.
 
+## No signal
+
+Valetate is built for garages and basement ramps. The built app installs a small service worker (`sw.js`, generated at build time with the list of build files), so it opens with no signal. It then shows the lot as the phone last saw it. Car changes made offline wait in an outbox on the phone and are sent, in order, when the signal comes back. The back button closes whatever is open (dialogs, sheets, the sign-up form) instead of leaving the app.
+
 ## Accounts, roles, and live data (Supabase)
 
 When `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` are set (see `.env`), Valetate requires sign-in, and everything is shared across a company in real time:

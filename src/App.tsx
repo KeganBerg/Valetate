@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ASSETS, type AssetDef } from './assets';
 import { Canvas, MAX_Z, MIN_Z, type View } from './components/Canvas';
 import { Inspector } from './components/Inspector';
@@ -12,18 +12,22 @@ import { findCar, friendlyError, nextOpenSpot, nextTag } from './ops';
 import { keyHook } from './keys';
 import { blockersOf, blocksAfterMove } from './stacks';
 import { currentMapId, setCurrentMapId } from './storage';
+import { useBackToClose } from './dialog';
+import { saveLot } from './lotCache';
 import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
 import { liveRequests, newGuestToken } from './requests';
-import { GuestLinkDialog } from './components/GuestLink';
-import { PhotoSheet } from './components/PhotoSheet';
 import { createPhotoQueue } from './photoQueue';
 import type { CarRequest, LotEvent, LotMap, MapItem, ParkedCar, Shift, Spot, Tip } from './types';
 import { almostFull, isPre, standPoint } from './surge';
 import { EventDialog, EventPill } from './components/EventMode';
-import { ShiftSheet } from './components/ShiftSheet';
-import { Dashboard } from './components/Dashboard';
 import { dayStart, duration, money, splitPool } from './shifts';
+
+// opened now and then: loaded the first time they're needed
+const GuestLinkDialog = lazy(() => import('./components/GuestLink').then((m) => ({ default: m.GuestLinkDialog })));
+const PhotoSheet = lazy(() => import('./components/PhotoSheet').then((m) => ({ default: m.PhotoSheet })));
+const ShiftSheet = lazy(() => import('./components/ShiftSheet').then((m) => ({ default: m.ShiftSheet })));
+const Dashboard = lazy(() => import('./components/Dashboard').then((m) => ({ default: m.Dashboard })));
 
 function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean } {
   const id = currentMapId();
@@ -91,9 +95,11 @@ interface Props {
   account?: Account;
   initialMaps: LotMap[];
   initialCars: ParkedCar[];
+  /** where to keep a copy of the lot for opening with no signal */
+  cacheKey?: string;
 }
 
-export default function App({ source, role, account, initialMaps, initialCars }: Props) {
+export default function App({ source, role, account, initialMaps, initialCars, cacheKey }: Props) {
   const canEdit = canEditMaps(role);
   const init = useMemo(() => initialMap(initialMaps), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [state, dispatch] = useReducer(reducer, init.map, initState);
@@ -112,6 +118,15 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   const [mode, setMode] = useState<'edit' | 'live'>(canEdit ? 'edit' : 'live');
   const [saving, setSaving] = useState<'saved' | 'saving' | 'error'>('saved');
   const [panel, setPanel] = useState<'none' | 'palette' | 'inspector'>('none');
+  // on a phone the panels are sheets over the map: back closes them
+  const [phone, setPhone] = useState(() => matchMedia('(max-width: 820px)').matches);
+  useEffect(() => {
+    const mq = matchMedia('(max-width: 820px)');
+    const on = () => setPhone(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  useBackToClose(phone && panel !== 'none', () => setPanel('none'));
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState<Spot | null>(null);
   const [toast, setToast] = useState<{ msg: string; undo?: () => void; label?: string } | null>(null);
@@ -125,6 +140,11 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     return () => window.clearTimeout(t);
   }, [unsynced > 0]); // eslint-disable-line react-hooks/exhaustive-deps
   const [cars, setCars] = useState<ParkedCar[]>(initialCars);
+  useEffect(() => {
+    if (!cacheKey) return;
+    const t = window.setTimeout(() => saveLot(cacheKey, maps, cars), 1000);
+    return () => window.clearTimeout(t);
+  }, [cacheKey, maps, cars]);
   const [activeSpotKey, setActiveSpotKey] = useState<string | null>(null);
   const [moving, setMoving] = useState<ParkedCar | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -1076,47 +1096,55 @@ export default function App({ source, role, account, initialMaps, initialCars }:
           }}
         />
       )}
-      {reportOpen && <Dashboard source={source} onClose={() => setReportOpen(false)} />}
-      {shiftOpen && (
-        <ShiftSheet
-          me={source.me}
-          isManager={role !== 'valet'}
-          isAdmin={role === 'admin'}
-          now={now}
-          shifts={shifts}
-          tips={tips}
-          tipUrl={tipUrl}
-          cars={cars}
-          requests={requests}
-          onClose={() => setShiftOpen(false)}
-          onClockIn={(s) => {
-            setShifts((ss) => [...ss, s]);
-            run(source.clockIn(s), () => setShifts((ss) => ss.filter((x) => x.id !== s.id))).then(refreshTeam);
-            flash('Clocked in');
-          }}
-          onClockOut={(s, note) => {
-            setShifts((ss) => ss.map((x) => (x.id === s.id ? { ...x, endedAt: Date.now(), handoffNote: note } : x)));
-            run(source.clockOut(s.id, note)).then(refreshTeam);
-            flash(s.userId === source.me.id ? `Clocked out after ${duration(Date.now() - s.startedAt)}` : `${s.userName || 'Valet'} clocked out`);
-          }}
-          onTip={(t) => {
-            setTips((ts) => [...ts, t]);
-            run(source.addTip(t), () => setTips((ts) => ts.filter((x) => x.id !== t.id))).then(refreshTeam);
-            flash(`${money(t.amountCents)} ${t.method === 'cash' ? 'cash' : 'digital'} tip logged`);
-          }}
-          onVoidTip={(t) => {
-            setTips((ts) => ts.filter((x) => x.id !== t.id));
-            run(source.voidTip(t.id), () => setTips((ts) => [...ts, t])).then(refreshTeam);
-          }}
-          onTipUrl={(u) => {
-            setTipUrl(u);
-            run(source.setTipUrl(u)).then(refreshTeam);
-            flash(u ? 'Tip link saved' : 'Tip link removed');
-          }}
-        />
+      {reportOpen && (
+        <Suspense fallback={null}>
+          <Dashboard source={source} onClose={() => setReportOpen(false)} />
+        </Suspense>
       )}
-      {photoCar && <PhotoSheet car={photoCar} source={source} queue={photoQueue} onClose={() => setPhotoCar(null)} />}
-      {guestLinkCar && <GuestLinkDialog car={guestLinkCar} company={account?.companyName} onClose={() => setGuestLinkCar(null)} />}
+      {shiftOpen && (
+        <Suspense fallback={null}>
+          <ShiftSheet
+            me={source.me}
+            isManager={role !== 'valet'}
+            isAdmin={role === 'admin'}
+            now={now}
+            shifts={shifts}
+            tips={tips}
+            tipUrl={tipUrl}
+            cars={cars}
+            requests={requests}
+            onClose={() => setShiftOpen(false)}
+            onClockIn={(s) => {
+              setShifts((ss) => [...ss, s]);
+              run(source.clockIn(s), () => setShifts((ss) => ss.filter((x) => x.id !== s.id))).then(refreshTeam);
+              flash('Clocked in');
+            }}
+            onClockOut={(s, note) => {
+              setShifts((ss) => ss.map((x) => (x.id === s.id ? { ...x, endedAt: Date.now(), handoffNote: note } : x)));
+              run(source.clockOut(s.id, note)).then(refreshTeam);
+              flash(s.userId === source.me.id ? `Clocked out after ${duration(Date.now() - s.startedAt)}` : `${s.userName || 'Valet'} clocked out`);
+            }}
+            onTip={(t) => {
+              setTips((ts) => [...ts, t]);
+              run(source.addTip(t), () => setTips((ts) => ts.filter((x) => x.id !== t.id))).then(refreshTeam);
+              flash(`${money(t.amountCents)} ${t.method === 'cash' ? 'cash' : 'digital'} tip logged`);
+            }}
+            onVoidTip={(t) => {
+              setTips((ts) => ts.filter((x) => x.id !== t.id));
+              run(source.voidTip(t.id), () => setTips((ts) => [...ts, t])).then(refreshTeam);
+            }}
+            onTipUrl={(u) => {
+              setTipUrl(u);
+              run(source.setTipUrl(u)).then(refreshTeam);
+              flash(u ? 'Tip link saved' : 'Tip link removed');
+            }}
+          />
+        </Suspense>
+      )}
+      <Suspense fallback={null}>
+        {photoCar && <PhotoSheet car={photoCar} source={source} queue={photoQueue} onClose={() => setPhotoCar(null)} />}
+        {guestLinkCar && <GuestLinkDialog car={guestLinkCar} company={account?.companyName} onClose={() => setGuestLinkCar(null)} />}
+      </Suspense>
 
       {showMaps && (
         <MapsDialog

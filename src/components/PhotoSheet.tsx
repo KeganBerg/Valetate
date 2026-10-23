@@ -4,6 +4,7 @@ import { preparePhoto, SIDES, sideLabel, stampText } from '../photos';
 import type { PendingPhoto as Pending, PhotoQueue } from '../photoQueue';
 import { uid } from '../geometry';
 import type { CarPhoto, ParkedCar, PhotoSide } from '../types';
+import { useDialog } from '../dialog';
 
 const time = (t: number) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
@@ -12,6 +13,7 @@ const time = (t: number) => new Date(t).toLocaleTimeString([], { hour: 'numeric'
  * the picture is shrunk and stamped on the phone and uploads in the background.
  */
 export function PhotoSheet({ car, source, queue, onClose }: { car: ParkedCar; source: DataSource; queue: PhotoQueue; onClose: () => void }) {
+  const dialog = useDialog(onClose);
   const [photos, setPhotos] = useState<CarPhoto[] | null>(null);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const pending = queue.forCar(car.id);
@@ -80,7 +82,7 @@ export function PhotoSheet({ car, source, queue, onClose }: { car: ParkedCar; so
 
   return (
     <div className="dialog-backdrop" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog photos" role="dialog" aria-label="Walkaround photos">
+      <div className="dialog photos" {...dialog} aria-label="Walkaround photos">
         <header>
           <h2>
             Walkaround · #{car.ticket || car.plate}

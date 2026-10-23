@@ -1,5 +1,4 @@
 import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { MapSvg } from './components/MapSvg';
 import { isLotMap } from './storage';
 import type { LotMap } from './types';
@@ -19,7 +18,9 @@ export function fileSafe(name: string) {
   return name.trim().replace(/[^\w\- ]+/g, '').replace(/\s+/g, '-').toLowerCase() || 'lot-map';
 }
 
-export function mapToSvgString(map: LotMap): string {
+// the server renderer is big and only needed for exports: load it on first use
+export async function mapToSvgString(map: LotMap): Promise<string> {
+  const { renderToStaticMarkup } = await import('react-dom/server');
   return renderToStaticMarkup(createElement(MapSvg, { map }));
 }
 
@@ -30,12 +31,12 @@ export function exportJson(map: LotMap) {
   download(blob, `${fileSafe(map.name)}.valetate.json`);
 }
 
-export function exportSvg(map: LotMap) {
-  download(new Blob([mapToSvgString(map)], { type: 'image/svg+xml' }), `${fileSafe(map.name)}.svg`);
+export async function exportSvg(map: LotMap) {
+  download(new Blob([await mapToSvgString(map)], { type: 'image/svg+xml' }), `${fileSafe(map.name)}.svg`);
 }
 
 export async function exportPng(map: LotMap, scale = 2) {
-  const svg = mapToSvgString(map);
+  const svg = await mapToSvgString(map);
   const img = new Image();
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
   try {

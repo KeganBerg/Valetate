@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { CarDetails } from '../data/source';
 import { CAR_COLORS, CAR_MAKES, carMatches, colorHex, formatElapsed, nextOpenSpot } from '../ops';
 import type { CarRequest, LotEvent, ParkedCar, Spot } from '../types';
@@ -6,9 +6,11 @@ import { EventCard } from './EventMode';
 import { carsWithKeysOut, hookTaken, keyHook, KEYS_LATE_MS } from '../keys';
 import { matchPlate } from '../plates';
 import { blockedBy, blockersOf, carsNear } from '../stacks';
-import { PlateScanner } from './PlateScanner';
 import { RequestQueue, RequestStatus, type RequestActions } from './RequestQueue';
 import { SheetHandle } from './SheetHandle';
+
+// opened now and then: loaded the first time they're needed
+const PlateScanner = lazy(() => import('./PlateScanner').then((m) => ({ default: m.PlateScanner })));
 
 type NewCar = Omit<ParkedCar, 'id' | 'mapId' | 'spotKey' | 'spotLabel' | 'parkedAt' | 'keysWith' | 'keysWithName' | 'keysOutAt' | 'blocks'> & { blocks: string[] };
 
@@ -570,42 +572,44 @@ export function LivePanel(p: Props) {
       </ul>
 
       {scan && (
-        <PlateScanner
-          title={scan === 'find' ? 'Find a car by plate' : 'Scan plate'}
-          useLabel={scan === 'find' ? 'Find car' : 'Use plate'}
-          describe={(plate) => {
-            const hit = matchPlate(p.allCars, plate);
-            if (scan === 'find')
-              return hit ? (
-                <>
-                  {hit.ticket && <b>#{hit.ticket}</b>} {carTitle(hit)} · {hit.spotLabel}
-                </>
-              ) : (
-                <span className="muted">No parked car has this plate.</span>
-              );
-            return hit && hit.id !== car?.id ? (
-              <span className="warn-text">
-                Already parked in {hit.spotLabel}
-                {hit.ticket ? ` (#${hit.ticket})` : ''}
-              </span>
-            ) : null;
-          }}
-          onUse={(plate) => {
-            setScan(null);
-            if (scan === 'park') {
-              set({ plate });
-              setMore(true);
-            } else if (scan === 'edit') setEditing((e) => e && { ...e, plate });
-            else {
+        <Suspense fallback={null}>
+          <PlateScanner
+            title={scan === 'find' ? 'Find a car by plate' : 'Scan plate'}
+            useLabel={scan === 'find' ? 'Find car' : 'Use plate'}
+            describe={(plate) => {
               const hit = matchPlate(p.allCars, plate);
-              if (hit) {
-                setQ('');
-                p.onFind(hit.plate);
-              } else setQ(plate);
-            }
-          }}
-          onClose={() => setScan(null)}
-        />
+              if (scan === 'find')
+                return hit ? (
+                  <>
+                    {hit.ticket && <b>#{hit.ticket}</b>} {carTitle(hit)} · {hit.spotLabel}
+                  </>
+                ) : (
+                  <span className="muted">No parked car has this plate.</span>
+                );
+              return hit && hit.id !== car?.id ? (
+                <span className="warn-text">
+                  Already parked in {hit.spotLabel}
+                  {hit.ticket ? ` (#${hit.ticket})` : ''}
+                </span>
+              ) : null;
+            }}
+            onUse={(plate) => {
+              setScan(null);
+              if (scan === 'park') {
+                set({ plate });
+                setMore(true);
+              } else if (scan === 'edit') setEditing((e) => e && { ...e, plate });
+              else {
+                const hit = matchPlate(p.allCars, plate);
+                if (hit) {
+                  setQ('');
+                  p.onFind(hit.plate);
+                } else setQ(plate);
+              }
+            }}
+            onClose={() => setScan(null)}
+          />
+        </Suspense>
       )}
     </aside>
   );
