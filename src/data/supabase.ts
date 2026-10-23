@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { LotMap, MapItem, ParkedCar } from '../types';
+import type { CarRequest, LotMap, MapItem, ParkedCar } from '../types';
 import type { CarDetails, DataSource, Role } from './source';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -69,6 +69,7 @@ interface CarRow {
   ticket: string;
   notes: string;
   parked_at: string;
+  guest_token?: string;
 }
 
 const toMap = (r: MapRow): LotMap => ({
@@ -94,7 +95,38 @@ const toCar = (r: CarRow): ParkedCar => ({
   ownerPhone: r.owner_phone,
   ticket: r.ticket,
   notes: r.notes,
+  guestToken: r.guest_token,
   parkedAt: Date.parse(r.parked_at),
+});
+
+interface RequestRow {
+  id: string;
+  map_id: string;
+  car_id: string;
+  status: 'open' | 'claimed' | 'ready';
+  source: 'staff' | 'guest' | 'sms';
+  note: string;
+  created_at: string;
+  created_by_name: string;
+  claimed_by: string | null;
+  claimed_by_name: string;
+  claimed_at: string | null;
+  ready_at: string | null;
+}
+
+const toRequest = (r: RequestRow): CarRequest => ({
+  id: r.id,
+  carId: r.car_id,
+  mapId: r.map_id,
+  status: r.status,
+  source: r.source ?? 'staff',
+  note: r.note,
+  createdAt: Date.parse(r.created_at),
+  createdByName: r.created_by_name,
+  claimedBy: r.claimed_by ?? '',
+  claimedByName: r.claimed_by_name,
+  claimedAt: r.claimed_at ? Date.parse(r.claimed_at) : null,
+  readyAt: r.ready_at ? Date.parse(r.ready_at) : null,
 });
 
 const DETAIL_COLUMNS: Record<keyof CarDetails, string> = {
@@ -180,9 +212,10 @@ export const team = {
 
 // ---------- shared maps and cars ----------
 
-export function cloudSource(companyId: string, userId: string): DataSource {
+export function cloudSource(companyId: string, userId: string, userName: string): DataSource {
   return {
     kind: 'cloud',
+    me: { id: userId, name: userName },
     async listMaps() {
       const rows = check(
         await db().from('lot_maps').select('*').eq('company_id', companyId).order('updated_at', { ascending: false }),
@@ -233,6 +266,7 @@ export function cloudSource(companyId: string, userId: string): DataSource {
             owner_phone: c.ownerPhone,
             ticket: c.ticket,
             notes: c.notes,
+            ...(c.guestToken ? { guest_token: c.guestToken } : {}),
             parked_at: new Date(c.parkedAt).toISOString(),
             parked_by: userId,
           }),
@@ -252,6 +286,55 @@ export function cloudSource(companyId: string, userId: string): DataSource {
           .eq('id', id),
       );
     },
+    async listRequests() {
+      const rows = check(
+        await db().from('requests').select('*').eq('company_id', companyId).in('status', ['open', 'claimed', 'ready']).order('created_at'),
+      ) as RequestRow[];
+      return rows.map(toRequest);
+    },
+    async createRequest(r) {
+      const res = await db()
+        .from('requests')
+        .insert({
+          id: r.id,
+          company_id: companyId,
+          map_id: r.mapId,
+          car_id: r.carId,
+          note: r.note,
+          created_at: new Date(r.createdAt).toISOString(),
+          created_by: userId,
+          created_by_name: userName,
+        });
+      if (res.error?.code === '23505') throw new Error('That car is already requested');
+      check(res);
+    },
+    async claimRequest(id) {
+      // only an open request can be claimed, so two valets can't both take it
+      const rows = check(
+        await db()
+          .from('requests')
+          .update({ status: 'claimed', claimed_by: userId, claimed_by_name: userName, claimed_at: new Date().toISOString() })
+          .eq('id', id)
+          .eq('status', 'open')
+          .select('id'),
+      ) as { id: string }[];
+      if (!rows.length) throw new Error('Someone else already has it');
+    },
+    async unclaimRequest(id) {
+      check(
+        await db()
+          .from('requests')
+          .update({ status: 'open', claimed_by: null, claimed_by_name: '', claimed_at: null })
+          .eq('id', id)
+          .eq('status', 'claimed'),
+      );
+    },
+    async markReady(id) {
+      check(await db().from('requests').update({ status: 'ready', ready_at: new Date().toISOString() }).eq('id', id));
+    },
+    async cancelRequest(id) {
+      check(await db().from('requests').update({ status: 'cancelled', closed_at: new Date().toISOString() }).eq('id', id));
+    },
     async unretrieveCar(car) {
       check(
         await db()
@@ -265,12 +348,14 @@ export function cloudSource(companyId: string, userId: string): DataSource {
         .channel(`company-${companyId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'parked_cars', filter: `company_id=eq.${companyId}` }, on.cars)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'lot_maps', filter: `company_id=eq.${companyId}` }, on.maps)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'requests', filter: `company_id=eq.${companyId}` }, () => on.requests?.())
         .subscribe((status) => {
           // changes made while disconnected are not replayed, so reload after every (re)join
           if (status === 'SUBSCRIBED') {
             on.live?.(true);
             on.cars();
             on.maps();
+            on.requests?.();
           } else on.live?.(false);
         });
       return () => {

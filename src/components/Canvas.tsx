@@ -63,8 +63,12 @@ interface Props {
   occupied: Map<string, ParkedCar>;
   now: number;
   activeSpot: string | null;
+  /** live mode: spots whose car has been asked for, by Spot.key */
+  requested?: Map<string, 'open' | 'claimed' | 'ready'>;
   onSpotClick: (spot: Spot | null) => void;
 }
+
+const REQ_COLOR = { open: '#ffb020', claimed: '#4da3ff', ready: '#34c759' } as const;
 
 const clampZ = (z: number) => Math.min(MAX_Z, Math.max(MIN_Z, z));
 
@@ -82,6 +86,7 @@ export function Canvas({
   occupied,
   now,
   activeSpot,
+  requested,
   onSpotClick,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -533,6 +538,27 @@ export function Canvas({
                   </text>
                 </g>
               )}
+            </g>
+          );
+        })}
+
+        {liveSpots.map((sp) => {
+          const st = requested?.get(sp.key);
+          if (!st) return null;
+          const pad = 5;
+          return (
+            <g key={`req-${sp.key}`} transform={`translate(${sp.cx} ${sp.cy}) rotate(${sp.rotation})`} pointerEvents="none">
+              <rect
+                className={`req-ring ${st}`}
+                x={-sp.w / 2 - pad}
+                y={-sp.h / 2 - pad}
+                width={sp.w + pad * 2}
+                height={sp.h + pad * 2}
+                rx={6}
+                fill="none"
+                stroke={REQ_COLOR[st]}
+                strokeWidth={Math.max(3, 3 / view.z)}
+              />
             </g>
           );
         })}

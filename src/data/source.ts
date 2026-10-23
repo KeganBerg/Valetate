@@ -1,4 +1,4 @@
-import type { LotMap, ParkedCar } from '../types';
+import type { CarRequest, LotMap, ParkedCar } from '../types';
 
 export type CarDetails = Partial<
   Pick<ParkedCar, 'plate' | 'color' | 'make' | 'vehicle' | 'ownerName' | 'ownerPhone' | 'ticket' | 'notes'>
@@ -29,12 +29,24 @@ export interface DataSource {
   moveCar(id: string, spotKey: string, spotLabel: string): Promise<void>;
   /** fill in details after a fast check-in */
   updateCar(id: string, patch: CarDetails): Promise<void>;
+  /** the car left the lot; any request for it is finished too */
   retrieveCar(id: string): Promise<void>;
+  /** who is using this device, for claiming requests */
+  me: { id: string; name: string };
+  /** requests that are open, claimed or ready */
+  listRequests(): Promise<CarRequest[]>;
+  createRequest(r: CarRequest): Promise<void>;
+  /** fails if someone else claimed it first */
+  claimRequest(id: string): Promise<void>;
+  unclaimRequest(id: string): Promise<void>;
+  /** the car is at the stand; the guest's page says so */
+  markReady(id: string): Promise<void>;
+  cancelRequest(id: string): Promise<void>;
   /** put a car marked retrieved by mistake back on its spot */
   unretrieveCar(car: ParkedCar): Promise<void>;
   /**
-   * called when another device changes maps or cars; `live` reports whether
+   * called when another device changes maps, cars or requests; `live` reports whether
    * changes are arriving (false while the connection is down)
    */
-  subscribe(on: { maps: () => void; cars: () => void; live?: (live: boolean) => void }): () => void;
+  subscribe(on: { maps: () => void; cars: () => void; requests?: () => void; live?: (live: boolean) => void }): () => void;
 }

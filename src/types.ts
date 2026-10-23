@@ -95,6 +95,26 @@ export interface ParkedCar {
   ownerPhone: string;
   /** key tag / ticket number: the one thing a valet must enter at rush */
   ticket: string;
+  /** secret for the guest's request link; cloud only */
+  guestToken?: string;
   notes: string;
   parkedAt: number;
+}
+
+/** Someone asked for a parked car; a valet claims it and brings it up. */
+export interface CarRequest {
+  id: string;
+  carId: string;
+  mapId: string;
+  /** open: nobody has it · claimed: a valet is getting it · ready: it's at the stand */
+  status: 'open' | 'claimed' | 'ready';
+  /** who asked: the stand, or the guest from their link */
+  source: 'staff' | 'guest' | 'sms';
+  note: string;
+  createdAt: number;
+  createdByName: string;
+  claimedBy: string;
+  claimedByName: string;
+  claimedAt: number | null;
+  readyAt: number | null;
 }

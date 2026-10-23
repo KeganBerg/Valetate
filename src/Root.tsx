@@ -257,7 +257,7 @@ function Cloud() {
 
   const current = memberships?.find((m) => m.company.id === companyId) ?? (memberships?.length === 1 ? memberships[0] : null);
   const source = useMemo(
-    () => (current && userId ? cloudSource(current.company.id, userId) : null),
+    () => (current && userId ? cloudSource(current.company.id, userId, displayName(session!.user)) : null),
     [current?.company.id, userId], // eslint-disable-line react-hooks/exhaustive-deps
   );
 

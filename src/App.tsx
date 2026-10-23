@@ -12,7 +12,9 @@ import { findCar, friendlyError, nextOpenSpot, nextTag } from './ops';
 import { currentMapId, setCurrentMapId } from './storage';
 import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
-import type { LotMap, MapItem, ParkedCar, Spot } from './types';
+import { liveRequests, newGuestToken } from './requests';
+import { GuestLinkDialog } from './components/GuestLink';
+import type { CarRequest, LotMap, MapItem, ParkedCar, Spot } from './types';
 
 function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean } {
   const id = currentMapId();
@@ -163,6 +165,39 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     setCurrentMapId(map.id);
   }, [map.id]);
 
+  // retrieval requests, and a heads-up when a new one comes in from another device
+  const [requests, setRequests] = useState<CarRequest[]>([]);
+  const [guestLinkCar, setGuestLinkCar] = useState<ParkedCar | null>(null);
+  const seenRequests = useRef<Set<string> | null>(null);
+  const refreshRequests = useCallback(async () => {
+    const list = await source.listRequests().catch(() => null);
+    if (!list) return;
+    const seen = seenRequests.current;
+    const fresh = seen ? list.filter((r) => !seen.has(r.id) && r.status === 'open') : [];
+    seenRequests.current = new Set(list.map((r) => r.id));
+    setRequests(list);
+    if (fresh.length) {
+      const c = carsRef.current.find((x) => x.id === fresh[0].carId);
+      flash(`New request: ${c ? `${carName(c)} in ${c.spotLabel}` : 'a car'}${fresh.length > 1 ? ` (+${fresh.length - 1})` : ''}`);
+      navigator.vibrate?.([120, 60, 120]);
+    }
+  }, [source, flash]);
+  const carsRef = useRef(cars);
+  carsRef.current = cars;
+  useEffect(() => {
+    refreshRequests();
+  }, [refreshRequests]);
+  const mapRequests = useMemo(
+    () => liveRequests(requests, new Set(mapCars.map((c) => c.id))),
+    [requests, mapCars],
+  );
+  const requestedSpots = useMemo(() => {
+    const byCar = new Map(mapCars.map((c) => [c.id, c.spotKey]));
+    return new Map(mapRequests.map((r) => [byCar.get(r.carId)!, r.status]));
+  }, [mapRequests, mapCars]);
+  const patchRequest = (id: string, patch: Partial<CarRequest>) =>
+    setRequests((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
   const refreshCars = useCallback(async () => {
     try {
       setCars(await source.listCars());
@@ -180,6 +215,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     () =>
       source.subscribe({
         cars: refreshCars,
+        requests: refreshRequests,
         live: setLive,
         maps: async () => {
           const ms = await source.listMaps().catch(() => null);
@@ -193,7 +229,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
           }
         },
       }),
-    [source, refreshCars],
+    [source, refreshCars, refreshRequests],
   );
 
   // a phone that slept or lost signal missed changes: catch up as soon as it's back
@@ -357,6 +393,46 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     const sel = map.items.filter((i) => selected.includes(i.id));
     const rest = map.items.filter((i) => !selected.includes(i.id));
     commit(where === 'front' ? [...rest, ...sel] : [...sel, ...rest]);
+  };
+
+  const retrieveCar = (car: ParkedCar) => {
+    const putBack = () => setCars((cs) => [...cs.filter((c) => c.id !== car.id), car]);
+    const takeOff = () => setCars((cs) => cs.filter((c) => c.id !== car.id));
+    takeOff();
+    setRequests((rs) => rs.filter((r) => r.carId !== car.id));
+    const done = source.retrieveCar(car.id);
+    run(done, putBack);
+    // a mis-tap at rush shouldn't lose a car: offer undo for a few seconds
+    flash(`${carName(car)} retrieved from ${car.spotLabel}`, () => {
+      putBack();
+      run(
+        done.catch(() => {}).then(() => source.unretrieveCar(car)),
+        takeOff,
+      );
+      flash(`${carName(car)} is back in ${car.spotLabel}`);
+    });
+  };
+
+  const requestCar = (car: ParkedCar) => {
+    const r: CarRequest = {
+      id: uid(),
+      carId: car.id,
+      mapId: car.mapId,
+      status: 'open',
+      source: 'staff',
+      note: '',
+      createdAt: Date.now(),
+      createdByName: source.me.name,
+      claimedBy: '',
+      claimedByName: '',
+      claimedAt: null,
+      readyAt: null,
+    };
+    seenRequests.current?.add(r.id);
+    setRequests((rs) => [...rs, r]);
+    run(source.createRequest(r), () => setRequests((rs) => rs.filter((x) => x.id !== r.id))).then(refreshRequests);
+    setNow(Date.now());
+    flash(`${carName(car)} requested`);
   };
 
   const centerOn = (s: Spot) => {
@@ -591,6 +667,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             }}
             mode={mode}
             occupied={occupied}
+            requested={mode === 'live' ? requestedSpots : undefined}
             now={now}
             activeSpot={activeSpotKey}
             onSpotClick={onSpotClick}
@@ -614,6 +691,9 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             )}
             <button className={panel === 'inspector' ? 'on' : ''} onClick={() => setPanel(panel === 'inspector' ? 'none' : 'inspector')}>
               {mode === 'edit' ? 'Properties' : 'Cars'}
+              {mode === 'live' && mapRequests.some((r) => r.status === 'open') && (
+                <span className="tab-badge">{mapRequests.filter((r) => r.status === 'open').length}</span>
+              )}
             </button>
           </div>
           {toast && (
@@ -674,6 +754,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
                 spotKey: spot.key,
                 spotLabel: spot.label,
                 parkedAt: Date.now(),
+                ...(source.kind === 'cloud' ? { guestToken: newGuestToken() } : {}),
               };
               setCars((cs) => [...cs, car]);
               run(source.parkCar(car), () => setCars((cs) => cs.filter((c) => c.id !== car.id)));
@@ -691,22 +772,37 @@ export default function App({ source, role, account, initialMaps, initialCars }:
               if (patch.ticket) setLastTag(patch.ticket);
               flash('Details saved');
             }}
-            onRetrieve={(car) => {
-              const putBack = () => setCars((cs) => [...cs.filter((c) => c.id !== car.id), car]);
-              const takeOff = () => setCars((cs) => cs.filter((c) => c.id !== car.id));
-              takeOff();
-              const done = source.retrieveCar(car.id);
-              run(done, putBack);
-              // a mis-tap at rush shouldn't lose a car: offer undo for a few seconds
-              flash(`${carName(car)} retrieved from ${car.spotLabel}`, () => {
-                putBack();
-                run(
-                  done.catch(() => {}).then(() => source.unretrieveCar(car)),
-                  takeOff,
-                );
-                flash(`${carName(car)} is back in ${car.spotLabel}`);
-              });
+            onRetrieve={retrieveCar}
+            requests={mapRequests}
+            me={source.me.id}
+            onRequest={requestCar}
+            onRequestTag={(tag) => {
+              const t = tag.replace(/^#/, '').trim().toLowerCase();
+              const car = mapCars.find((c) => c.ticket.trim().toLowerCase() === t) ?? cars.find((c) => c.ticket.trim().toLowerCase() === t);
+              if (!car) return `No car with tag #${tag} is parked`;
+              if (car.mapId !== map.id) return `#${tag} is on another lot`;
+              if (requests.some((r) => r.carId === car.id)) return `#${tag} is already requested`;
+              requestCar(car);
+              return null;
             }}
+            onGuestLink={source.kind === 'cloud' ? setGuestLinkCar : undefined}
+            onClaim={(r) => {
+              patchRequest(r.id, { status: 'claimed', claimedBy: source.me.id, claimedByName: source.me.name, claimedAt: Date.now() });
+              run(source.claimRequest(r.id)).then(refreshRequests);
+            }}
+            onUnclaim={(r) => {
+              patchRequest(r.id, { status: 'open', claimedBy: '', claimedByName: '', claimedAt: null });
+              run(source.unclaimRequest(r.id)).then(refreshRequests);
+            }}
+            onReady={(r) => {
+              patchRequest(r.id, { status: 'ready', readyAt: Date.now() });
+              run(source.markReady(r.id)).then(refreshRequests);
+            }}
+            onCancel={(r) => {
+              setRequests((rs) => rs.filter((x) => x.id !== r.id));
+              run(source.cancelRequest(r.id)).then(refreshRequests);
+            }}
+            onHandOver={retrieveCar}
             onStartMove={setMoving}
             onFocus={(s) => {
               setActiveSpotKey(s.key);
@@ -715,6 +811,8 @@ export default function App({ source, role, account, initialMaps, initialCars }:
           />
         )}
       </main>
+
+      {guestLinkCar && <GuestLinkDialog car={guestLinkCar} company={account?.companyName} onClose={() => setGuestLinkCar(null)} />}
 
       {showMaps && (
         <MapsDialog
