@@ -2701,7 +2701,7 @@ table.crew tbody tr:last-child td {
 
 /* ---------- touch screens: every tap target at least 44px ---------- */
 @media (pointer: coarse) {
-  button:not(.sheet-handle):not(.swatch):not(.color-chip),
+  button:not(.sheet-handle):not(.swatch):not(.color-chip):not(.thumb-x),
   select,
   input:not([type='color']):not([type='checkbox']):not([type='radio']):not([type='range']) {
     min-height: 44px;
@@ -3031,8 +3031,8 @@ button.new-incident {
   top: 4px;
   right: 4px;
   margin: 0;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   min-height: 0;
   padding: 0;
   border-radius: 50%;

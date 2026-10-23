@@ -264,6 +264,7 @@ function NewIncident(p: Props & { onDone: (inc: Incident) => void }) {
               <img src={ph.url} alt="" />
               <button
                 type="button"
+                className="thumb-x"
                 aria-label="Remove photo"
                 onClick={() => {
                   URL.revokeObjectURL(ph.url);
