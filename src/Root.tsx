@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import App from './App';
 import { TeamDialog } from './components/TeamDialog';
 import { localSource } from './data/local';
+import { withOutbox } from './data/outbox';
 import { canEditMaps, type DataSource, type Role } from './data/source';
 import {
   cloudSource,
@@ -342,7 +343,10 @@ function Cloud() {
 
   const current = memberships?.find((m) => m.company.id === companyId) ?? (memberships?.length === 1 ? memberships[0] : null);
   const source = useMemo(
-    () => (current && userId ? cloudSource(current.company.id, userId, displayName(session!.user)) : null),
+    () =>
+      current && userId
+        ? withOutbox(cloudSource(current.company.id, userId, displayName(session!.user)), `valetate.outbox.${current.company.id}.${userId}`)
+        : null,
     [current?.company.id, userId], // eslint-disable-line react-hooks/exhaustive-deps
   );
 

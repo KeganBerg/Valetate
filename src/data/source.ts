@@ -1,4 +1,5 @@
 import type { CarPhoto, CarRequest, LotMap, ParkedCar, PhotoSide } from '../types';
+import type { Outbox } from './outbox';
 
 export type CarDetails = Partial<
   Pick<ParkedCar, 'plate' | 'color' | 'make' | 'vehicle' | 'ownerName' | 'ownerPhone' | 'ticket' | 'notes'>
@@ -20,6 +21,8 @@ export const canEditMaps = (r: Role) => r === 'admin' || r === 'manager';
  */
 export interface DataSource {
   kind: 'local' | 'cloud';
+  /** car changes waiting for signal (cloud only) */
+  outbox?: Outbox;
   listMaps(): Promise<LotMap[]>;
   saveMap(map: LotMap): Promise<void>;
   deleteMap(id: string): Promise<void>;
