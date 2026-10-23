@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { CarDetails } from '../data/source';
 import { CAR_COLORS, CAR_MAKES, carMatches, colorHex, formatElapsed, nextOpenSpot } from '../ops';
 import type { CarRequest, ParkedCar, Spot } from '../types';
+import { matchPlate } from '../plates';
+import { PlateScanner } from './PlateScanner';
 import { RequestQueue, RequestStatus, type RequestActions } from './RequestQueue';
 import { SheetHandle } from './SheetHandle';
 
@@ -34,6 +36,8 @@ interface Props extends RequestActions {
   onRetrieve: (car: ParkedCar) => void;
   onStartMove: (car: ParkedCar | null) => void;
   onFocus: (spot: Spot) => void;
+  /** jump to a car or spot on any map, as the top search does */
+  onFind: (q: string) => void;
   open: boolean;
   onClose: () => void;
 }
@@ -97,7 +101,7 @@ function Chips({ value, onChange, color }: { value: Pick<NewCar, 'color' | 'make
   );
 }
 
-function DetailFields({ form, set }: { form: NewCar; set: (v: Partial<NewCar>) => void }) {
+function DetailFields({ form, set, onScan }: { form: NewCar; set: (v: Partial<NewCar>) => void; onScan: () => void }) {
   const field = (k: keyof NewCar, label: string, extra: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
     <label className="field">
       <span>{label}</span>
@@ -106,7 +110,15 @@ function DetailFields({ form, set }: { form: NewCar; set: (v: Partial<NewCar>) =
   );
   return (
     <>
-      {field('plate', 'License plate', { autoCapitalize: 'characters' })}
+      <label className="field">
+        <span>License plate</span>
+        <div className="with-btn">
+          <input value={form.plate} autoCapitalize="characters" onChange={(e) => set({ plate: e.target.value })} />
+          <button type="button" className="scan-btn" onClick={onScan} aria-label="Scan plate with camera">
+            📷
+          </button>
+        </div>
+      </label>
       {field('vehicle', 'Model', { placeholder: 'Model 3, Camry…' })}
       <div className="row2">
         {field('ownerName', 'Owner name')}
@@ -122,6 +134,7 @@ export function LivePanel(p: Props) {
   const [more, setMore] = useState(false);
   const [editing, setEditing] = useState<NewCar | null>(null);
   const [q, setQ] = useState('');
+  const [scan, setScan] = useState<'park' | 'edit' | 'find' | null>(null);
   const tagRef = useRef<HTMLInputElement>(null);
   const set = (v: Partial<NewCar>) => setForm((f) => ({ ...f, ...v }));
 
@@ -140,6 +153,7 @@ export function LivePanel(p: Props) {
   const taken = new Set(p.cars.map((c) => c.spotKey));
   const openSpot = nextOpenSpot(p.spots, taken, p.active?.key);
   const dupTag = !car && form.ticket.trim() && p.allCars.find((c) => c.ticket.trim() === form.ticket.trim());
+  const dupPlate = !car && form.plate.trim() ? matchPlate(p.allCars, form.plate) : undefined;
   const list = [...p.cars].sort((a, b) => a.parkedAt - b.parkedAt).filter((c) => carMatches(c, q));
 
   const park = () => {
@@ -280,7 +294,7 @@ export function LivePanel(p: Props) {
           </label>
           <Chips color value={editing} onChange={(v) => setEditing({ ...editing, ...v })} />
           <Chips value={editing} onChange={(v) => setEditing({ ...editing, ...v })} />
-          <DetailFields form={editing} set={(v) => setEditing({ ...editing, ...v })} />
+          <DetailFields form={editing} set={(v) => setEditing({ ...editing, ...v })} onScan={() => setScan('edit')} />
           <div className="actions">
             <button className="primary" type="submit">
               Save
@@ -319,11 +333,22 @@ export function LivePanel(p: Props) {
           <Chips color value={form} onChange={set} />
           <Chips value={form} onChange={set} />
           {more ? (
-            <DetailFields form={form} set={set} />
+            <DetailFields form={form} set={set} onScan={() => setScan('park')} />
           ) : (
-            <button type="button" className="link more" onClick={() => setMore(true)}>
-              + Plate, owner, notes (optional)
-            </button>
+            <div className="more-row">
+              <button type="button" className="scan-plate" onClick={() => setScan('park')}>
+                📷 Scan plate
+              </button>
+              <button type="button" className="link more" onClick={() => setMore(true)}>
+                + Plate, owner, notes
+              </button>
+            </div>
+          )}
+          {dupPlate && (
+            <p className="warn">
+              Plate {dupPlate.plate} is already parked in {dupPlate.spotLabel}
+              {dupPlate.ticket ? ` (#${dupPlate.ticket})` : ''}.
+            </p>
           )}
           <button className="primary big" type="submit">
             Park {form.ticket ? `#${form.ticket}` : ''} in {p.active.label}
@@ -343,7 +368,12 @@ export function LivePanel(p: Props) {
       )}
 
       <h3>Parked cars</h3>
-      <input className="search" placeholder="Search tag, plate, owner, color" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="with-btn search-row">
+        <input className="search" placeholder="Search tag, plate, owner, color" value={q} onChange={(e) => setQ(e.target.value)} />
+        <button className="scan-btn" onClick={() => setScan('find')} aria-label="Find a car by scanning its plate">
+          📷
+        </button>
+      </div>
       <ul className="car-list">
         {list.map((c) => {
           const spot = spotByKey.get(c.spotKey);
@@ -362,6 +392,45 @@ export function LivePanel(p: Props) {
         })}
         {!list.length && <li className="empty">{p.cars.length ? 'No matches' : 'No cars parked yet'}</li>}
       </ul>
+
+      {scan && (
+        <PlateScanner
+          title={scan === 'find' ? 'Find a car by plate' : 'Scan plate'}
+          useLabel={scan === 'find' ? 'Find car' : 'Use plate'}
+          describe={(plate) => {
+            const hit = matchPlate(p.allCars, plate);
+            if (scan === 'find')
+              return hit ? (
+                <>
+                  {hit.ticket && <b>#{hit.ticket}</b>} {carTitle(hit)} · {hit.spotLabel}
+                </>
+              ) : (
+                <span className="muted">No parked car has this plate.</span>
+              );
+            return hit && hit.id !== car?.id ? (
+              <span className="warn-text">
+                Already parked in {hit.spotLabel}
+                {hit.ticket ? ` (#${hit.ticket})` : ''}
+              </span>
+            ) : null;
+          }}
+          onUse={(plate) => {
+            setScan(null);
+            if (scan === 'park') {
+              set({ plate });
+              setMore(true);
+            } else if (scan === 'edit') setEditing((e) => e && { ...e, plate });
+            else {
+              const hit = matchPlate(p.allCars, plate);
+              if (hit) {
+                setQ('');
+                p.onFind(hit.plate);
+              } else setQ(plate);
+            }
+          }}
+          onClose={() => setScan(null)}
+        />
+      )}
     </aside>
   );
 }

@@ -804,6 +804,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
               flash('Details saved');
             }}
             onRetrieve={retrieveCar}
+            onFind={find}
             requests={mapRequests}
             me={source.me.id}
             onRequest={requestCar}
