@@ -1,5 +1,9 @@
 import type { LotMap, ParkedCar } from '../types';
 
+export type CarDetails = Partial<
+  Pick<ParkedCar, 'plate' | 'color' | 'make' | 'vehicle' | 'ownerName' | 'ownerPhone' | 'ticket' | 'notes'>
+>;
+
 export type Role = 'admin' | 'manager' | 'valet';
 
 export const ROLE_INFO: Record<Role, { name: string; can: string }> = {
@@ -23,6 +27,8 @@ export interface DataSource {
   listCars(): Promise<ParkedCar[]>;
   parkCar(car: ParkedCar): Promise<void>;
   moveCar(id: string, spotKey: string, spotLabel: string): Promise<void>;
+  /** fill in details after a fast check-in */
+  updateCar(id: string, patch: CarDetails): Promise<void>;
   retrieveCar(id: string): Promise<void>;
   /** called when another device changes maps or cars */
   subscribe(on: { maps: () => void; cars: () => void }): () => void;

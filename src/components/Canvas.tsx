@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch } from 'react';
 import { GRID, center, itemBounds, listSpots, normalizeAngle, rotatePt, snap, spotAt, toLocal } from '../geometry';
-import { formatElapsed } from '../ops';
+import { isLight } from '../assets';
+import { colorHex, formatElapsed } from '../ops';
 import type { Action } from '../store';
 import type { LotMap, MapItem, ParkedCar, Spot } from '../types';
 import { FONT, MapItems } from './MapSvg';
@@ -372,7 +373,10 @@ export function Canvas({
           const upright = Math.abs(Math.sin((sp.rotation * Math.PI) / 180)) > Math.abs(Math.cos((sp.rotation * Math.PI) / 180));
           const bw = upright ? sp.h : sp.w;
           const bh = upright ? sp.w : sp.h;
-          const fs = Math.max(5, Math.min(13, bw / 4.2, bh / 2.6));
+          const fill = car ? (colorHex(car.color) ?? '#d6343a') : '#4da3ff';
+          const ink = car && isLight(fill) ? '#111' : '#fff';
+          const tag = car ? (car.ticket ? `#${car.ticket}` : car.plate) : '';
+          const fs = Math.max(5, Math.min(13, (bw * 0.9) / Math.max(3, tag.length * 0.62), bh / 2.8));
           return (
             <g key={sp.key} pointerEvents="none">
               <g transform={`translate(${sp.cx} ${sp.cy}) rotate(${sp.rotation})`}>
@@ -381,18 +385,19 @@ export function Canvas({
                   y={-sp.h / 2 + 1.5}
                   width={sp.w - 3}
                   height={sp.h - 3}
-                  fill={car ? '#d6343a' : '#4da3ff'}
+                  rx={Math.min(sp.w, sp.h) * 0.18}
+                  fill={fill}
                   fillOpacity={car ? 1 : 0.35}
-                  stroke={active ? '#4da3ff' : 'none'}
-                  strokeWidth={active ? 3 : 0}
+                  stroke={active ? '#4da3ff' : '#0b0d10'}
+                  strokeWidth={active ? 3.5 : 1.5}
                 />
               </g>
               {car && (
                 <g transform={`translate(${sp.cx} ${sp.cy})`}>
-                  <text textAnchor="middle" y={-fs * 0.55} fontSize={fs} fontWeight={800} fill="#fff">
-                    {sp.label.replace(/^.* /, '')}
+                  <text textAnchor="middle" y={-fs * 0.5} fontSize={fs} fontWeight={800} fill={ink}>
+                    {tag}
                   </text>
-                  <text textAnchor="middle" y={fs * 0.75} fontSize={fs * 0.9} fontWeight={600} fill="#fff">
+                  <text textAnchor="middle" y={fs * 0.75} fontSize={fs * 0.85} fontWeight={600} fill={ink} opacity={0.85}>
                     {formatElapsed(now - car.parkedAt)}
                   </text>
                 </g>

@@ -10,7 +10,7 @@ All-in-one valet operations app. This first piece is the **lot map editor**, plu
   - Drag to move, use the handles to resize, and use the round handle to rotate (snaps to 15°; hold Alt for free rotation).
   - Snap to grid, undo/redo, copy/paste, multi-select (Shift-click or Shift-drag), and arrow-key nudging.
   - Rows: set the row letter, the first number, and the count, or count from the other end. Spot labels look like `D 12`. The editor warns about duplicate labels.
-- **Live lot**: tap a spot to park a car there (plate, vehicle, owner, phone, ticket, notes). Taken spots turn red and show how long the car has been parked. You can move a car to another spot or mark it retrieved, and search by plate, spot, ticket, or owner.
+- **Live lot**: built for rush hour. Tap a spot, and the next key tag number is already filled in. Tap a color and a make, then **Park**, which takes about three taps per car. The next closest open spot is selected automatically. Plate, owner, phone, and notes are optional and can be added later. Taken spots are filled with the car's color and show its tag and how long it has been parked. You can move a car or mark it retrieved, and search by tag, plate, owner, or color.
 - **Find spot**: type `d12`, `D 12`, or `R3` to jump to that spot.
 - **Maps**: you can keep several maps, start from templates (blank, surface lot, garage level), or open examples recreated from real venue maps (Broward Center back lot and front ramp, WPB Marriott). Maps can be imported and exported as files, and saved as PNG or SVG.
 - Works on phones: pinch to zoom, and the panels open as bottom sheets.

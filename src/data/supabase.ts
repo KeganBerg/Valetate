@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { LotMap, MapItem, ParkedCar } from '../types';
-import type { DataSource, Role } from './source';
+import type { CarDetails, DataSource, Role } from './source';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
@@ -61,6 +61,8 @@ interface CarRow {
   spot_key: string;
   spot_label: string;
   plate: string;
+  color: string;
+  make: string;
   vehicle: string;
   owner_name: string;
   owner_phone: string;
@@ -85,6 +87,8 @@ const toCar = (r: CarRow): ParkedCar => ({
   spotKey: r.spot_key,
   spotLabel: r.spot_label,
   plate: r.plate,
+  color: r.color ?? '',
+  make: r.make ?? '',
   vehicle: r.vehicle,
   ownerName: r.owner_name,
   ownerPhone: r.owner_phone,
@@ -92,6 +96,26 @@ const toCar = (r: CarRow): ParkedCar => ({
   notes: r.notes,
   parkedAt: Date.parse(r.parked_at),
 });
+
+const DETAIL_COLUMNS: Record<keyof CarDetails, string> = {
+  plate: 'plate',
+  color: 'color',
+  make: 'make',
+  vehicle: 'vehicle',
+  ownerName: 'owner_name',
+  ownerPhone: 'owner_phone',
+  ticket: 'ticket',
+  notes: 'notes',
+};
+
+function carDetailsRow(patch: CarDetails) {
+  const row: Record<string, string> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    const col = DETAIL_COLUMNS[k as keyof CarDetails];
+    if (col && typeof v === 'string') row[col] = v;
+  }
+  return row;
+}
 
 // ---------- account ----------
 
@@ -202,6 +226,8 @@ export function cloudSource(companyId: string, userId: string): DataSource {
             spot_key: c.spotKey,
             spot_label: c.spotLabel,
             plate: c.plate,
+            color: c.color,
+            make: c.make,
             vehicle: c.vehicle,
             owner_name: c.ownerName,
             owner_phone: c.ownerPhone,
@@ -214,6 +240,9 @@ export function cloudSource(companyId: string, userId: string): DataSource {
     },
     async moveCar(id, spotKey, spotLabel) {
       check(await db().from('parked_cars').update({ spot_key: spotKey, spot_label: spotLabel }).eq('id', id));
+    },
+    async updateCar(id, patch) {
+      check(await db().from('parked_cars').update(carDetailsRow(patch)).eq('id', id));
     },
     async retrieveCar(id) {
       check(
