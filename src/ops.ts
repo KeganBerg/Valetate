@@ -127,3 +127,40 @@ export function carMatches(c: { ticket: string; plate: string; ownerName: string
     normalizePlate(`${c.color}${c.make}`).includes(n)
   );
 }
+
+type Findable = { ticket: string; plate: string; ownerName: string; make: string; color: string };
+
+/**
+ * The car a valet most likely means: an exact tag beats an exact plate, which
+ * beats a tag that starts with the query, and so on. `rank` is 0 for an exact
+ * tag; lower is a better match.
+ */
+export function findCar<C extends Findable>(cars: C[], q: string): { car: C; rank: number } | undefined {
+  const n = normalizePlate(q);
+  if (!n) return undefined;
+  const rank = (c: C) => {
+    const tag = normalizePlate(c.ticket);
+    const plate = normalizePlate(c.plate);
+    if (tag === n) return 0;
+    if (plate === n) return 1;
+    if (tag.startsWith(n)) return 2;
+    if (plate.includes(n)) return 3;
+    return carMatches(c, q) ? 4 : Infinity;
+  };
+  let best: { car: C; rank: number } | undefined;
+  for (const car of cars) {
+    const r = rank(car);
+    if (r < (best?.rank ?? Infinity)) best = { car, rank: r };
+  }
+  return best;
+}
+
+/** What a valet should read instead of a raw database or network error. */
+export function friendlyError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/parked_cars_one_per_spot/.test(msg)) return 'Someone just parked in that spot. Pick another one.';
+  if (/failed to fetch|network|load failed|offline/i.test(msg)) return "No signal, so that didn't save. Try again.";
+  if (/jwt|expired|not authenticated/i.test(msg)) return 'Your sign-in expired. Sign in again.';
+  if (/row-level security|permission denied/i.test(msg)) return "You don't have permission to do that.";
+  return msg;
+}
