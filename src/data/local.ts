@@ -5,6 +5,22 @@ import { loadShifts, loadTips, loadTipUrl, saveShifts, saveTips, saveTipUrl } fr
 import { localPhotos } from './photoStore';
 import { deleteMap, loadMaps, saveMap } from '../storage';
 import type { DataSource } from './source';
+import { loadHistory, logHistory, type RequestVisit } from '../report';
+import type { CarRequest } from '../types';
+
+const visitOf = (r: CarRequest, status: RequestVisit['status']): RequestVisit => ({
+  id: r.id,
+  carId: r.carId,
+  createdAt: r.createdAt,
+  claimedAt: r.claimedAt,
+  readyAt: r.readyAt,
+  closedAt: Date.now(),
+  claimedBy: r.claimedBy,
+  claimedByName: r.claimedByName,
+  status,
+  source: r.source,
+  dueAt: r.dueAt ?? null,
+});
 
 /** Single-device mode: everything stays in this browser. */
 export const localSource: DataSource = {
@@ -33,6 +49,14 @@ export const localSource: DataSource = {
   setBlocks: async (id, blocks) => saveCars(loadCars().map((c) => (c.id === id ? { ...c, blocks } : c))),
   retrieveCar: async (id) => {
     logRetrieval(Date.now());
+    const car = loadCars().find((c) => c.id === id);
+    if (car)
+      logHistory({
+        cars: [{ id, mapId: car.mapId, parkedAt: car.parkedAt, retrievedAt: Date.now(), parkedBy: 'local', retrievedBy: 'local' }],
+        requests: loadRequests()
+          .filter((r) => r.carId === id)
+          .map((r) => visitOf(r, 'done')),
+      });
     saveCars(loadCars().filter((c) => c.id !== id));
     saveRequests(loadRequests().filter((r) => r.carId !== id));
   },
@@ -56,7 +80,26 @@ export const localSource: DataSource = {
     ),
   markReady: async (id) =>
     saveRequests(loadRequests().map((x) => (x.id === id ? { ...x, status: 'ready', readyAt: Date.now() } : x))),
-  cancelRequest: async (id) => saveRequests(loadRequests().filter((x) => x.id !== id)),
+  cancelRequest: async (id) => {
+    const r = loadRequests().find((x) => x.id === id);
+    if (r) logHistory({ requests: [visitOf(r, 'cancelled')] });
+    saveRequests(loadRequests().filter((x) => x.id !== id));
+  },
+  reportData: async (since) => {
+    const h = loadHistory();
+    return {
+      cars: [
+        ...h.cars.filter((c) => c.parkedAt >= since || (c.retrievedAt ?? 0) >= since),
+        ...loadCars()
+          .filter((c) => c.parkedAt >= since)
+          .map((c) => ({ id: c.id, mapId: c.mapId, parkedAt: c.parkedAt, retrievedAt: null, parkedBy: 'local', retrievedBy: '' })),
+      ],
+      requests: [...h.requests, ...loadRequests().map((r) => visitOf(r, r.status))].filter((r) => r.createdAt >= since),
+      tips: loadTips().filter((t) => !t.voided && t.createdAt >= since),
+      shifts: loadShifts().filter((s) => !s.endedAt || s.endedAt >= since),
+      people: { local: 'You' },
+    };
+  },
   getEvent: async () => loadEvent(),
   startEvent: async (e) => saveEvent(e),
   updateEvent: async (id, patch) => {

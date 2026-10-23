@@ -1,5 +1,6 @@
 import type { CarPhoto, CarRequest, LotEvent, LotMap, ParkedCar, PhotoSide, Shift, Tip } from '../types';
 import type { Outbox } from './outbox';
+import type { ReportData } from '../report';
 
 export type CarDetails = Partial<
   Pick<ParkedCar, 'plate' | 'color' | 'make' | 'vehicle' | 'ownerName' | 'ownerPhone' | 'ticket' | 'notes' | 'keySlot'>
@@ -78,6 +79,8 @@ export interface DataSource {
   /** the guests' digital tip link (Venmo, Cash App…); admins set it */
   getTipUrl(): Promise<string>;
   setTipUrl(url: string): Promise<void>;
+  /** cars, requests, tips and shifts since `since`, for the manager dashboard */
+  reportData(since: number): Promise<ReportData>;
   /** put a car marked retrieved by mistake back on its spot */
   unretrieveCar(car: ParkedCar): Promise<void>;
   /**

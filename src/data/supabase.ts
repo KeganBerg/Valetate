@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { CarPhoto, CarRequest, LotMap, MapItem, ParkedCar, PhotoSide } from '../types';
 import { MapConflict, type CarDetails, type DataSource, type Role } from './source';
+import type { RequestVisit } from '../report';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
@@ -531,6 +532,73 @@ export function cloudSource(companyId: string, userId: string, userName: string)
     },
     async setTipUrl(url) {
       check(await db().from('companies').update({ tip_url: url }).eq('id', companyId));
+    },
+    async reportData(since) {
+      const iso = new Date(since).toISOString();
+      // a busy month is more rows than one request returns, so page through
+      const all = async <T,>(q: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) => {
+        const out: T[] = [];
+        for (let i = 0; ; i += 1000) {
+          const page = check(await q(i, i + 999)) as T[];
+          out.push(...page);
+          if (page.length < 1000 || out.length >= 50000) return out;
+        }
+      };
+      type CarRow = { id: string; map_id: string; parked_at: string; retrieved_at: string | null; parked_by: string | null; retrieved_by: string | null };
+      type ReqRow = Pick<RequestRow, 'id' | 'car_id' | 'created_at' | 'claimed_at' | 'ready_at' | 'claimed_by' | 'claimed_by_name' | 'source' | 'due_at'> & {
+        status: RequestVisit['status'];
+        closed_at: string | null;
+      };
+      const ms = (t: string | null) => (t ? Date.parse(t) : null);
+      const [cars, reqs, tips, shifts, people] = await Promise.all([
+        all<CarRow>((a, b) =>
+          db()
+            .from('parked_cars')
+            .select('id, map_id, parked_at, retrieved_at, parked_by, retrieved_by')
+            .eq('company_id', companyId)
+            .or(`parked_at.gte.${iso},retrieved_at.gte.${iso}`)
+            .order('parked_at')
+            .range(a, b),
+        ),
+        all<ReqRow>((a, b) =>
+          db()
+            .from('requests')
+            .select('id, car_id, created_at, claimed_at, ready_at, closed_at, claimed_by, claimed_by_name, status, source, due_at')
+            .eq('company_id', companyId)
+            .gte('created_at', iso)
+            .order('created_at')
+            .range(a, b),
+        ),
+        this.listTips(since),
+        this.listShifts(since),
+        team.members(companyId).catch(() => [] as Member[]),
+      ]);
+      return {
+        cars: cars.map((c) => ({
+          id: c.id,
+          mapId: c.map_id,
+          parkedAt: Date.parse(c.parked_at),
+          retrievedAt: ms(c.retrieved_at),
+          parkedBy: c.parked_by ?? '',
+          retrievedBy: c.retrieved_by ?? '',
+        })),
+        requests: reqs.map((r) => ({
+          id: r.id,
+          carId: r.car_id,
+          createdAt: Date.parse(r.created_at),
+          claimedAt: ms(r.claimed_at),
+          readyAt: ms(r.ready_at),
+          closedAt: ms(r.closed_at),
+          claimedBy: r.claimed_by ?? '',
+          claimedByName: r.claimed_by_name ?? '',
+          status: r.status,
+          source: r.source,
+          dueAt: ms(r.due_at ?? null),
+        })),
+        tips,
+        shifts,
+        people: Object.fromEntries(people.map((m) => [m.user_id, m.display_name || m.email.split('@')[0]])),
+      };
     },
     async unretrieveCar(car) {
       check(
