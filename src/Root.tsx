@@ -1,6 +1,7 @@
-import type { Session } from '@supabase/supabase-js';
+import type { AuthError, Session } from '@supabase/supabase-js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import App from './App';
+import { alreadyRegistered, authMessage } from './authMessages';
 import { TeamDialog } from './components/TeamDialog';
 import { localSource } from './data/local';
 import { withOutbox } from './data/outbox';
@@ -111,46 +112,92 @@ function Workspace({
   return <App source={source} role={role} account={account} initialMaps={data.maps} initialCars={data.cars} />;
 }
 
+type AuthMode = 'in' | 'up' | 'forgot';
+const backHere = () => location.origin + location.pathname;
+
 function Login({ invited }: { invited: boolean }) {
-  // someone opening an invite link most likely has no account yet
-  const [mode, setMode] = useState<'in' | 'up'>(invited ? 'up' : 'in');
+  const [mode, setMode] = useState<AuthMode>('in');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'error' | 'info'; text: string } | null>(null);
+  // an account already exists for the email typed into "Create account"
+  const [exists, setExists] = useState(false);
+
+  const go = (m: AuthMode) => {
+    setMode(m);
+    setMsg(null);
+    setExists(false);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setMsg(null);
+    setExists(false);
     const auth = supabase!.auth;
-    const res =
-      mode === 'in'
-        ? await auth.signInWithPassword({ email, password })
-        : await auth.signUp({ email, password, options: { data: { name: name.trim() }, emailRedirectTo: location.origin + location.pathname } });
-    setBusy(false);
-    if (res.error) return setMsg({ kind: 'error', text: res.error.message });
-    if (mode === 'up' && !res.data.session) setMsg({ kind: 'info', text: `Check ${email} for a link to confirm your account.` });
+    try {
+      if (mode === 'forgot') {
+        const { error } = await auth.resetPasswordForEmail(email, { redirectTo: backHere() });
+        if (error) throw error;
+        setMsg({ kind: 'info', text: `Sent. Open the link in the email to ${email} on this phone to pick a new password.` });
+      } else if (mode === 'in') {
+        const { error } = await auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      } else {
+        const { data, error } = await auth.signUp({
+          email,
+          password,
+          options: { data: { name: name.trim() }, emailRedirectTo: backHere() },
+        });
+        if (error && !alreadyRegistered(null, error)) throw error;
+        if (alreadyRegistered(data.user, error)) {
+          // try the password they just typed: it may be the right one
+          const retry = await auth.signInWithPassword({ email, password });
+          if (!retry.error) return;
+          setMode('in');
+          setExists(true);
+        } else if (!data.session) {
+          setMsg({ kind: 'info', text: `Check ${email} for a link to confirm your account.` });
+        }
+      }
+    } catch (err) {
+      setMsg({ kind: 'error', text: authMessage(err as AuthError) });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const magicLink = async () => {
     if (!email) return setMsg({ kind: 'error', text: 'Enter your email first.' });
     setBusy(true);
-    const { error } = await supabase!.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+    const { error } = await supabase!.auth.signInWithOtp({ email, options: { emailRedirectTo: backHere(), shouldCreateUser: false } });
     setBusy(false);
-    setMsg(error ? { kind: 'error', text: error.message } : { kind: 'info', text: `Sign-in link sent to ${email}.` });
+    setMsg(
+      error
+        ? { kind: 'error', text: /signups not allowed|not found/i.test(error.message) ? `No account for ${email} yet. Create one below.` : authMessage(error) }
+        : { kind: 'info', text: `Sign-in link sent to ${email}. Open it on this phone.` },
+    );
   };
 
+  const title = mode === 'in' ? 'Sign in to Valetate' : mode === 'up' ? 'Create your account' : 'Reset your password';
   return (
     <div className="screen">
       <form className="screen-card" onSubmit={submit}>
         <span className="logo big">V</span>
-        <h1>{mode === 'in' ? 'Sign in to Valetate' : 'Create your account'}</h1>
-        {invited ? (
-          <p className="info">You've been invited to a team. Create your account (or sign in) to join.</p>
+        <h1>{title}</h1>
+        {mode === 'forgot' ? (
+          <p className="muted">We'll email you a link to pick a new password.</p>
+        ) : invited ? (
+          <p className="info">You've been invited to a team. Sign in, or create an account if you're new, to join.</p>
         ) : (
           <p className="muted">The live lot for your whole valet team.</p>
+        )}
+        {exists && (
+          <p className="info">
+            There's already an account for {email}. Sign in with its password, or tap Forgot password to set a new one.
+          </p>
         )}
         {mode === 'up' && (
           <label className="field">
@@ -162,20 +209,27 @@ function Login({ invited }: { invited: boolean }) {
           <span>Email</span>
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
         </label>
-        <label className="field">
-          <span>Password</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === 'in' ? 'current-password' : 'new-password'}
-            minLength={6}
-            required
-          />
-        </label>
+        {mode !== 'forgot' && (
+          <label className="field">
+            <span>Password</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={mode === 'in' ? 'current-password' : 'new-password'}
+              minLength={6}
+              required
+            />
+          </label>
+        )}
+        {mode === 'in' && (
+          <button type="button" className="link forgot" onClick={() => go('forgot')}>
+            Forgot password?
+          </button>
+        )}
         {msg && <p className={msg.kind === 'error' ? 'error' : 'info'}>{msg.text}</p>}
         <button className="primary wide" disabled={busy}>
-          {mode === 'in' ? 'Sign in' : 'Create account'}
+          {busy ? 'One moment…' : mode === 'in' ? 'Sign in' : mode === 'up' ? 'Create account' : 'Email me a reset link'}
         </button>
         {mode === 'in' && (
           <button type="button" className="link" onClick={magicLink} disabled={busy}>
@@ -183,11 +237,53 @@ function Login({ invited }: { invited: boolean }) {
           </button>
         )}
         <p className="muted small">
-          {mode === 'in' ? 'New here?' : 'Already have an account?'}{' '}
-          <button type="button" className="link" onClick={() => setMode(mode === 'in' ? 'up' : 'in')}>
+          {mode === 'up' ? 'Already have an account?' : mode === 'in' ? 'New here?' : 'Remembered it?'}{' '}
+          <button type="button" className="link" onClick={() => go(mode === 'in' ? 'up' : 'in')}>
             {mode === 'in' ? 'Create an account' : 'Sign in'}
           </button>
         </p>
+      </form>
+    </div>
+  );
+}
+
+/** Opened from a reset email: the link signed them in, now they pick a password. */
+function NewPassword({ onDone }: { onDone: () => void }) {
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    const { error } = await supabase!.auth.updateUser({ password });
+    setBusy(false);
+    if (error) return setError(authMessage(error));
+    onDone();
+  };
+  return (
+    <div className="screen">
+      <form className="screen-card" onSubmit={submit}>
+        <span className="logo big">V</span>
+        <h1>Pick a new password</h1>
+        <label className="field">
+          <span>New password</span>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
+            minLength={6}
+            required
+            autoFocus
+          />
+        </label>
+        {error && <p className="error">{error}</p>}
+        <button className="primary wide" disabled={busy}>
+          {busy ? 'Saving…' : 'Save password'}
+        </button>
+        <button type="button" className="link" onClick={onDone}>
+          Skip for now
+        </button>
       </form>
     </div>
   );
@@ -305,10 +401,14 @@ function Cloud() {
   const [showTeam, setShowTeam] = useState(false);
   const [joinCode] = useState(pendingJoinCode);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [recovering, setRecovering] = useState(false);
 
   useEffect(() => {
     supabase!.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data } = supabase!.auth.onAuthStateChange((_e, s) => setSession(s));
+    const { data } = supabase!.auth.onAuthStateChange((e, s) => {
+      if (e === 'PASSWORD_RECOVERY') setRecovering(true);
+      setSession(s);
+    });
     return () => data.subscription.unsubscribe();
   }, []);
 
@@ -352,6 +452,7 @@ function Cloud() {
 
   if (session === undefined) return <Splash />;
   if (!session) return <Login invited={!!joinCode} />;
+  if (recovering) return <NewPassword onDone={() => setRecovering(false)} />;
   if (!memberships) return <Splash text="Finding your team…" />;
   if (!memberships.length) return <Onboarding session={session} onDone={openCompany} joinError={joinError} />;
   if (!current || picking)
