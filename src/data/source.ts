@@ -33,13 +33,20 @@ export interface DataSource {
   retrieveCar(id: string): Promise<void>;
   /** who is using this device, for claiming requests */
   me: { id: string; name: string };
-  /** requests that are open or claimed */
+  /** requests that are open, claimed or ready */
   listRequests(): Promise<CarRequest[]>;
   createRequest(r: CarRequest): Promise<void>;
   /** fails if someone else claimed it first */
   claimRequest(id: string): Promise<void>;
   unclaimRequest(id: string): Promise<void>;
+  /** the car is at the stand; the guest's page says so */
+  markReady(id: string): Promise<void>;
   cancelRequest(id: string): Promise<void>;
-  /** called when another device changes maps, cars or requests */
-  subscribe(on: { maps: () => void; cars: () => void; requests: () => void }): () => void;
+  /** put a car marked retrieved by mistake back on its spot */
+  unretrieveCar(car: ParkedCar): Promise<void>;
+  /**
+   * called when another device changes maps, cars or requests; `live` reports whether
+   * changes are arriving (false while the connection is down)
+   */
+  subscribe(on: { maps: () => void; cars: () => void; requests?: () => void; live?: (live: boolean) => void }): () => void;
 }

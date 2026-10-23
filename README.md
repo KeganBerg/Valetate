@@ -31,6 +31,15 @@ Without those variables, the app runs in single-device mode and saves to the bro
 
 In the Supabase dashboard, open Authentication → URL Configuration and set **Site URL** to the Netlify site address (and add it under Redirect URLs), so confirmation and sign-in emails link back to the app.
 
+## Requests and the guest link
+
+- **Request queue** (Live lot): the stand types a tag (or taps "Request car" on a car), a valet taps **Claim**, then **Car is up** when it reaches the stand, then **Handed over** (which retrieves it). Everyone sees who has what, with timers that turn red after 5 minutes. Requested spots glow on the map (amber waiting, blue on its way, green at the stand).
+- **Guest link**: every car parked with a team account gets a private link (`?car=<token>`). "Guest link" on the car card shows a QR code to scan at check-in, or texts/shares the link from the valet's own phone. The guest page has one button, "Bring my car", and live status until the car is up. Guests only ever see the company, tag, color and make: never the plate, owner or spot. The page calls two `security definer` functions (`guest_car`, `guest_request`) that anonymous visitors may run; the tables themselves stay closed to them.
+
+### Adding automatic texts later (Twilio)
+
+The data is ready for it: requests record a `source` (`staff`, `guest`, `sms`), cars keep `owner_phone` and `guest_token`. The plan is a Supabase Edge Function that sends the welcome text (with the guest link) when a car is parked with a phone number, the "your car is ready" text when a request turns `ready`, and accepts "reply 1 to request" through a Twilio webhook. Setup needed: a Twilio account, a phone number (US: toll-free verification or A2P 10DLC registration, which can take days), and `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` saved as Edge Function secrets.
+
 ## Deploy
 
 Netlify builds and publishes the site from `main` using `netlify.toml`, and every pull request gets a deploy preview. GitHub Actions (`.github/workflows/ci.yml`) runs the tests and the build on each push.

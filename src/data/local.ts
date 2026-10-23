@@ -40,13 +40,16 @@ export const localSource: DataSource = {
     saveRequests(
       loadRequests().map((x) => (x.id === id ? { ...x, status: 'open', claimedBy: '', claimedByName: '', claimedAt: null } : x)),
     ),
+  markReady: async (id) =>
+    saveRequests(loadRequests().map((x) => (x.id === id ? { ...x, status: 'ready', readyAt: Date.now() } : x))),
   cancelRequest: async (id) => saveRequests(loadRequests().filter((x) => x.id !== id)),
+  unretrieveCar: async (car) => saveCars([...loadCars().filter((c) => c.id !== car.id), car]),
   subscribe(on) {
     // other tabs on this device
     const onStorage = (e: StorageEvent) => {
       if (e.key?.startsWith('valetate.maps')) on.maps();
       if (e.key?.startsWith('valetate.cars')) on.cars();
-      if (e.key?.startsWith('valetate.requests')) on.requests();
+      if (e.key?.startsWith('valetate.requests')) on.requests?.();
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { carMatches, colorHex, nextOpenSpot, nextTag } from './ops';
+import { carMatches, colorHex, findCar, friendlyError, nextOpenSpot, nextTag } from './ops';
 
 const car = (ticket: string, extra = {}) => ({ ticket, plate: '', ownerName: '', make: '', color: '', ...extra });
 
@@ -42,5 +42,29 @@ describe('fast check-in helpers', () => {
     expect(colorHex('black')).toBe('#1d1f22');
     expect(colorHex('')).toBeUndefined();
     expect(colorHex(undefined)).toBeUndefined();
+  });
+});
+
+describe('search and errors', () => {
+  it('prefers an exact tag over tags that only start with the query', () => {
+    const cars = [car('104'), car('10'), car('7', { plate: 'X10Y' })];
+    expect(findCar(cars, '10')?.car.ticket).toBe('10');
+    expect(findCar(cars, '10')?.rank).toBe(0);
+    expect(findCar(cars, '104')?.car.ticket).toBe('104');
+  });
+
+  it('falls back to plate, then tag prefix, then owner', () => {
+    const cars = [car('55', { plate: 'ABC123' }), car('123'), car('9', { ownerName: 'Jane Doe' })];
+    expect(findCar(cars, 'abc 123')?.car.ticket).toBe('55');
+    expect(findCar(cars, '12')?.car.ticket).toBe('123');
+    expect(findCar(cars, 'jane')?.car.ticket).toBe('9');
+    expect(findCar(cars, 'zzz')).toBeUndefined();
+    expect(findCar(cars, ' ')).toBeUndefined();
+  });
+
+  it('turns database errors into plain words', () => {
+    expect(friendlyError(new Error('duplicate key value violates unique constraint "parked_cars_one_per_spot"'))).toMatch(/just parked/);
+    expect(friendlyError(new TypeError('Failed to fetch'))).toMatch(/No signal/);
+    expect(friendlyError(new Error('something else'))).toBe('something else');
   });
 });
