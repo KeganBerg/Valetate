@@ -252,12 +252,27 @@ export function cloudSource(companyId: string, userId: string): DataSource {
           .eq('id', id),
       );
     },
+    async unretrieveCar(car) {
+      check(
+        await db()
+          .from('parked_cars')
+          .update({ status: 'parked', retrieved_at: null, retrieved_by: null })
+          .eq('id', car.id),
+      );
+    },
     subscribe(on) {
       const ch = db()
         .channel(`company-${companyId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'parked_cars', filter: `company_id=eq.${companyId}` }, on.cars)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'lot_maps', filter: `company_id=eq.${companyId}` }, on.maps)
-        .subscribe();
+        .subscribe((status) => {
+          // changes made while disconnected are not replayed, so reload after every (re)join
+          if (status === 'SUBSCRIBED') {
+            on.live?.(true);
+            on.cars();
+            on.maps();
+          } else on.live?.(false);
+        });
       return () => {
         db().removeChannel(ch);
       };

@@ -30,6 +30,11 @@ export interface DataSource {
   /** fill in details after a fast check-in */
   updateCar(id: string, patch: CarDetails): Promise<void>;
   retrieveCar(id: string): Promise<void>;
-  /** called when another device changes maps or cars */
-  subscribe(on: { maps: () => void; cars: () => void }): () => void;
+  /** put a car marked retrieved by mistake back on its spot */
+  unretrieveCar(car: ParkedCar): Promise<void>;
+  /**
+   * called when another device changes maps or cars; `live` reports whether
+   * changes are arriving (false while the connection is down)
+   */
+  subscribe(on: { maps: () => void; cars: () => void; live?: (live: boolean) => void }): () => void;
 }

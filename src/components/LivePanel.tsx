@@ -8,7 +8,12 @@ type NewCar = Omit<ParkedCar, 'id' | 'mapId' | 'spotKey' | 'spotLabel' | 'parked
 
 interface Props {
   spots: Spot[];
+  /** cars on this map */
   cars: ParkedCar[];
+  /** cars on every map, so a tag isn't handed out twice across a stand */
+  allCars: ParkedCar[];
+  /** cars on this map whose spot no longer exists */
+  orphans: ParkedCar[];
   active: Spot | null;
   now: number;
   moving: ParkedCar | null;
@@ -35,8 +40,12 @@ function carTitle(c: Pick<ParkedCar, 'color' | 'make' | 'vehicle'>) {
   return [c.color, c.make, c.vehicle].filter(Boolean).join(' ') || 'Car';
 }
 
+/** makes shown before "More": enough for most cars without pushing the Park button down */
+const TOP_MAKES = 8;
+
 /** Big tap targets for color and make: nothing to type at rush. */
 function Chips({ value, onChange, color }: { value: Pick<NewCar, 'color' | 'make'>; onChange: (v: Partial<NewCar>) => void; color?: boolean }) {
+  const [allMakes, setAllMakes] = useState(false);
   if (color)
     return (
       <div className="chips colors" role="radiogroup" aria-label="Color">
@@ -57,7 +66,7 @@ function Chips({ value, onChange, color }: { value: Pick<NewCar, 'color' | 'make
     );
   return (
     <div className="chips makes" role="radiogroup" aria-label="Make">
-      {CAR_MAKES.map((m) => (
+      {CAR_MAKES.filter((m, i) => allMakes || i < TOP_MAKES || m === value.make).map((m) => (
         <button
           type="button"
           key={m}
@@ -69,6 +78,11 @@ function Chips({ value, onChange, color }: { value: Pick<NewCar, 'color' | 'make
           {m}
         </button>
       ))}
+      {!allMakes && (
+        <button type="button" className="more-makes" onClick={() => setAllMakes(true)}>
+          More…
+        </button>
+      )}
     </div>
   );
 }
@@ -114,7 +128,7 @@ export function LivePanel(p: Props) {
   const spotByKey = new Map(p.spots.map((s) => [s.key, s]));
   const taken = new Set(p.cars.map((c) => c.spotKey));
   const openSpot = nextOpenSpot(p.spots, taken, p.active?.key);
-  const dupTag = !car && form.ticket.trim() && p.cars.find((c) => c.ticket.trim() === form.ticket.trim());
+  const dupTag = !car && form.ticket.trim() && p.allCars.find((c) => c.ticket.trim() === form.ticket.trim());
   const list = [...p.cars].sort((a, b) => a.parkedAt - b.parkedAt).filter((c) => carMatches(c, q));
 
   const park = () => {
@@ -133,7 +147,7 @@ export function LivePanel(p: Props) {
           <b>{p.cars.length}</b> parked
         </div>
         <div>
-          <b>{Math.max(0, p.spots.length - p.cars.length)}</b> open
+          <b>{Math.max(0, p.spots.length - (p.cars.length - p.orphans.length))}</b> open
         </div>
       </div>
 
@@ -144,6 +158,27 @@ export function LivePanel(p: Props) {
           </span>
           <button onClick={() => p.onStartMove(null)}>Cancel</button>
         </div>
+      )}
+
+      {p.orphans.length > 0 && !p.moving && (
+        <section className="card orphans">
+          <h2>
+            Needs a spot <span className="pill red">{p.orphans.length}</span>
+          </h2>
+          <p className="hint">Their spot was removed or renumbered on the map. Move each car to where it really is, or mark it retrieved.</p>
+          <ul className="orphan-list">
+            {p.orphans.map((c) => (
+              <li key={c.id}>
+                <span className="tag-sm">{c.ticket ? `#${c.ticket}` : c.plate}</span>
+                <span className="car-sm">
+                  <ColorDot name={c.color} /> {c.make || carTitle(c)} · was {c.spotLabel || '?'}
+                </span>
+                <button onClick={() => p.onStartMove(c)}>Move</button>
+                <button onClick={() => p.onRetrieve(c)}>Retrieved</button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {p.active && car && !editing && (

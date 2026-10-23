@@ -50,10 +50,11 @@ function Workspace({
   useEffect(load, [load]);
 
   // valets wait for a map; pick up the first one as soon as it's published
+  const waiting = !!data && !data.maps.length && !canEditMaps(role);
   useEffect(() => {
-    if (!data || data.maps.length || canEditMaps(role)) return;
+    if (!waiting) return;
     return source.subscribe({ maps: load, cars: () => {} });
-  }, [data, role, source, load]);
+  }, [waiting, source, load]);
 
   if (error)
     return (

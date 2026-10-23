@@ -980,3 +980,97 @@ button.fit-lot {
   width: 100%;
   margin-bottom: 12px;
 }
+
+/* ---------- peak-hour polish ---------- */
+/* the Park button stays on screen while the form scrolls under it */
+.quick button.big[type='submit'] {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  box-shadow: 0 -12px 16px var(--panel-2);
+}
+.toast.with-action {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 6px 6px 14px;
+}
+.toast.with-action button {
+  border-radius: 999px;
+  font-weight: 800;
+  color: var(--accent);
+  padding: 6px 14px;
+}
+.conn {
+  position: absolute;
+  left: 50%;
+  top: 58px;
+  transform: translateX(-50%);
+  background: #5c3d00;
+  color: #ffd98a;
+  border: 1px solid #a8740a;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.orphans {
+  border-color: #e5484d88;
+}
+.orphans .hint {
+  margin: 0 0 8px;
+}
+.orphan-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.orphan-list li {
+  display: grid;
+  grid-template-columns: 52px 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 0;
+}
+.chips.makes .more-makes {
+  color: var(--accent);
+  border-style: dashed;
+}
+@media (max-width: 820px) {
+  /* one row of chrome above the map on phones: map name, mode, menu; search below */
+  .topbar .brand {
+    display: none;
+  }
+  .map-name {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+    text-align: left;
+  }
+  .stats {
+    margin: 0 0 8px;
+  }
+  .stats > div {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 6px 10px;
+  }
+  .stats b {
+    display: inline;
+    font-size: 18px;
+  }
+  .find input,
+  .live .field input,
+  .live .search {
+    font-size: 16px;
+  }
+}
+@media (max-width: 820px) {
+  .topbar .grow {
+    display: none;
+  }
+}

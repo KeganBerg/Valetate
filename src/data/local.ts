@@ -17,6 +17,7 @@ export const localSource: DataSource = {
     saveCars(loadCars().map((c) => (c.id === id ? { ...c, spotKey, spotLabel } : c))),
   updateCar: async (id, patch) => saveCars(loadCars().map((c) => (c.id === id ? { ...c, ...patch } : c))),
   retrieveCar: async (id) => saveCars(loadCars().filter((c) => c.id !== id)),
+  unretrieveCar: async (car) => saveCars([...loadCars().filter((c) => c.id !== car.id), car]),
   subscribe(on) {
     // other tabs on this device
     const onStorage = (e: StorageEvent) => {

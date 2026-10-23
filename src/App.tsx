@@ -8,7 +8,7 @@ import { Palette } from './components/Palette';
 import { exportJson, exportPng, exportSvg, parseMapFile } from './export';
 import { GRID, duplicateSpotLabels, findSpot, listSpots, lotAround, snap, uid, unionBounds } from './geometry';
 import { canEditMaps, ROLE_INFO, type DataSource, type Role } from './data/source';
-import { carMatches, nextOpenSpot, nextTag } from './ops';
+import { findCar, friendlyError, nextOpenSpot, nextTag } from './ops';
 import { currentMapId, setCurrentMapId } from './storage';
 import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
@@ -38,17 +38,18 @@ function nextSpaceNumber(items: MapItem[]): string {
 
 const carName = (c: ParkedCar) => (c.ticket ? `#${c.ticket}` : c.plate);
 
-const LAST_TAG_KEY = 'valetate.lastTag.';
-function readLastTag(mapId: string): string {
+// key tags are handed out across every map at a stand, so one sequence for all of them
+const LAST_TAG_KEY = 'valetate.lastTag';
+function readLastTag(): string {
   try {
-    return localStorage.getItem(LAST_TAG_KEY + mapId) ?? '';
+    return localStorage.getItem(LAST_TAG_KEY) ?? '';
   } catch {
     return '';
   }
 }
-function writeLastTag(mapId: string, tag: string) {
+function writeLastTag(tag: string) {
   try {
-    localStorage.setItem(LAST_TAG_KEY + mapId, tag);
+    localStorage.setItem(LAST_TAG_KEY, tag);
   } catch {
     // not remembered; the suggestion falls back to the parked cars
   }
@@ -102,15 +103,16 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   const [panel, setPanel] = useState<'none' | 'palette' | 'inspector'>('none');
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState<Spot | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; undo?: () => void } | null>(null);
+  const [live, setLive] = useState(true);
   const [cars, setCars] = useState<ParkedCar[]>(initialCars);
   const [activeSpotKey, setActiveSpotKey] = useState<string | null>(null);
   const [moving, setMoving] = useState<ParkedCar | null>(null);
   const [now, setNow] = useState(Date.now());
-  const [lastTag, setLastTagState] = useState<string>(() => readLastTag(init.map.id));
+  const [lastTag, setLastTagState] = useState<string>(readLastTag);
   const setLastTag = (t: string) => {
     setLastTagState(t);
-    writeLastTag(map.id, t);
+    writeLastTag(t);
   };
   const stageRef = useRef<HTMLDivElement>(null);
   const clipboard = useRef<MapItem[]>([]);
@@ -120,11 +122,17 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   const duplicates = useMemo(() => duplicateSpotLabels(map.items), [map.items]);
   const mapCars = useMemo(() => cars.filter((c) => c.mapId === map.id), [cars, map.id]);
   const occupied = useMemo(() => new Map(mapCars.map((c) => [c.spotKey, c])), [mapCars]);
+  // cars whose spot was removed or renumbered in the editor: they still need retrieving
+  const orphans = useMemo(() => {
+    const keys = new Set(spots.map((s) => s.key));
+    return mapCars.filter((c) => !keys.has(c.spotKey));
+  }, [mapCars, spots]);
   const activeSpot = spots.find((s) => s.key === activeSpotKey) ?? null;
 
-  const flash = useCallback((msg: string) => {
-    setToast(msg);
-    window.setTimeout(() => setToast((t) => (t === msg ? null : t)), 2600);
+  const flash = useCallback((msg: string, undo?: () => void) => {
+    const t = { msg, undo };
+    setToast(t);
+    window.setTimeout(() => setToast((cur) => (cur === t ? null : cur)), undo ? 6000 : 2600);
   }, []);
 
   const upsertMapInList = (m: LotMap) => setMaps((ms) => [m, ...ms.filter((x) => x.id !== m.id)]);
@@ -153,7 +161,6 @@ export default function App({ source, role, account, initialMaps, initialCars }:
 
   useEffect(() => {
     setCurrentMapId(map.id);
-    setLastTagState(readLastTag(map.id));
   }, [map.id]);
 
   const refreshCars = useCallback(async () => {
@@ -173,6 +180,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     () =>
       source.subscribe({
         cars: refreshCars,
+        live: setLive,
         maps: async () => {
           const ms = await source.listMaps().catch(() => null);
           if (!ms) return;
@@ -188,9 +196,23 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     [source, refreshCars],
   );
 
+  // a phone that slept or lost signal missed changes: catch up as soon as it's back
+  useEffect(() => {
+    const catchUp = () => document.visibilityState === 'visible' && refreshCars();
+    document.addEventListener('visibilitychange', catchUp);
+    window.addEventListener('online', catchUp);
+    const offline = () => setLive(false);
+    window.addEventListener('offline', offline);
+    return () => {
+      document.removeEventListener('visibilitychange', catchUp);
+      window.removeEventListener('online', catchUp);
+      window.removeEventListener('offline', offline);
+    };
+  }, [refreshCars]);
+
   const run = (p: Promise<unknown>, undo?: () => void) =>
     p.catch((e) => {
-      flash(e instanceof Error ? e.message : String(e));
+      flash(friendlyError(e));
       undo?.();
       refreshCars();
     });
@@ -345,15 +367,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     setView({ z, x: r.width / 2 - s.cx * z, y: cy - s.cy * z });
   };
 
-  const find = (q: string) => {
-    let s = findSpot(map.items, q);
-    // in the live lot, "104" most often means tag 104, so check cars first
-    const car = mapCars.find((c) => carMatches(c, q) && q.trim());
-    if (car && (mode === 'live' || !s)) s = spots.find((sp) => sp.key === car.spotKey) ?? s;
-    if (!s) {
-      flash(`Nothing called "${q}"`);
-      return;
-    }
+  const focusSpot = (s: Spot) => {
     setHighlight(s);
     centerOn(s);
     if (mode === 'edit') dispatch({ type: 'select', ids: [s.itemId] });
@@ -362,6 +376,32 @@ export default function App({ source, role, account, initialMaps, initialCars }:
       setPanel('inspector');
     }
     window.setTimeout(() => setHighlight((h) => (h === s ? null : h)), 4000);
+  };
+
+  const find = (q: string) => {
+    if (!q.trim()) return;
+    const spot = findSpot(map.items, q);
+    // in the live lot, "104" most often means tag 104, so check cars on every map first;
+    // a spot label typed exactly still wins over a loose match like part of a plate
+    const hit = findCar(cars, q);
+    const useCar = hit && (mode === 'live' ? hit.rank <= 1 || !spot : !spot);
+    if (!useCar) {
+      if (spot) focusSpot(spot);
+      else flash(`Nothing called "${q}"`);
+      return;
+    }
+    const car = hit.car;
+    const m = car.mapId === map.id ? map : maps.find((x) => x.id === car.mapId);
+    if (!m) return flash(`${carName(car)} is on a map that was deleted`);
+    const s = listSpots(m.items).find((sp) => sp.key === car.spotKey);
+    if (m.id !== map.id) load(m, false);
+    if (!s) {
+      setPanel('inspector');
+      return flash(`${carName(car)} needs a new spot (see the top of the list)`);
+    }
+    // after switching maps, wait for the new map to be fitted before zooming in on the spot
+    if (m.id !== map.id) requestAnimationFrame(() => focusSpot(s));
+    else focusSpot(s);
   };
 
   const onSpotClick = (s: Spot | null) => {
@@ -473,7 +513,13 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             find(query);
           }}
         >
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find spot: D 12" aria-label="Find a spot" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={mode === 'live' ? 'Find tag, plate or spot' : 'Find spot: D 12'}
+            aria-label={mode === 'live' ? 'Find a car or spot' : 'Find a spot'}
+            enterKeyHint="search"
+          />
         </form>
         <div className="grow" />
         {mode === 'edit' && (
@@ -570,7 +616,27 @@ export default function App({ source, role, account, initialMaps, initialCars }:
               {mode === 'edit' ? 'Properties' : 'Cars'}
             </button>
           </div>
-          {toast && <div className="toast">{toast}</div>}
+          {toast && (
+            <div className={`toast ${toast.undo ? 'with-action' : ''}`} role="status">
+              {toast.msg}
+              {toast.undo && (
+                <button
+                  onClick={() => {
+                    const undo = toast.undo!;
+                    setToast(null);
+                    undo();
+                  }}
+                >
+                  Undo
+                </button>
+              )}
+            </div>
+          )}
+          {!live && source.kind === 'cloud' && mode === 'live' && (
+            <div className="conn" role="status">
+              Reconnecting… the lot may be out of date
+            </div>
+          )}
         </div>
         {mode === 'edit' ? (
           <Inspector
@@ -592,10 +658,12 @@ export default function App({ source, role, account, initialMaps, initialCars }:
           <LivePanel
             spots={spots}
             cars={mapCars}
+            allCars={cars}
+            orphans={orphans}
             active={activeSpot}
             now={now}
             moving={moving}
-            suggestedTag={nextTag(mapCars, lastTag)}
+            suggestedTag={nextTag(cars, lastTag)}
             open={panel === 'inspector'}
             onClose={() => setPanel('none')}
             onPark={(spot, data) => {
@@ -624,9 +692,20 @@ export default function App({ source, role, account, initialMaps, initialCars }:
               flash('Details saved');
             }}
             onRetrieve={(car) => {
-              setCars((cs) => cs.filter((c) => c.id !== car.id));
-              run(source.retrieveCar(car.id));
-              flash(`${carName(car)} retrieved from ${car.spotLabel}`);
+              const putBack = () => setCars((cs) => [...cs.filter((c) => c.id !== car.id), car]);
+              const takeOff = () => setCars((cs) => cs.filter((c) => c.id !== car.id));
+              takeOff();
+              const done = source.retrieveCar(car.id);
+              run(done, putBack);
+              // a mis-tap at rush shouldn't lose a car: offer undo for a few seconds
+              flash(`${carName(car)} retrieved from ${car.spotLabel}`, () => {
+                putBack();
+                run(
+                  done.catch(() => {}).then(() => source.unretrieveCar(car)),
+                  takeOff,
+                );
+                flash(`${carName(car)} is back in ${car.spotLabel}`);
+              });
             }}
             onStartMove={setMoving}
             onFocus={(s) => {
