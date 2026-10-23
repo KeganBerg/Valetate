@@ -131,6 +131,7 @@ interface RequestRow {
   claimed_by_name: string;
   claimed_at: string | null;
   ready_at: string | null;
+  due_at?: string | null;
 }
 
 const toRequest = (r: RequestRow): CarRequest => ({
@@ -146,6 +147,7 @@ const toRequest = (r: RequestRow): CarRequest => ({
   claimedByName: r.claimed_by_name,
   claimedAt: r.claimed_at ? Date.parse(r.claimed_at) : null,
   readyAt: r.ready_at ? Date.parse(r.ready_at) : null,
+  dueAt: r.due_at ? Date.parse(r.due_at) : null,
 });
 
 interface PhotoRow {
@@ -368,6 +370,7 @@ export function cloudSource(companyId: string, userId: string, userName: string)
           created_at: new Date(r.createdAt).toISOString(),
           created_by: userId,
           created_by_name: userName,
+          due_at: r.dueAt ? new Date(r.dueAt).toISOString() : null,
         });
       if (res.error?.code === '23505') throw new Error('That car is already requested');
       check(res);
@@ -398,6 +401,30 @@ export function cloudSource(companyId: string, userId: string, userName: string)
     },
     async cancelRequest(id) {
       check(await db().from('requests').update({ status: 'cancelled', closed_at: new Date().toISOString() }).eq('id', id));
+    },
+    async getEvent() {
+      const rows = check(
+        await db().from('lot_events').select('*').eq('company_id', companyId).is('ended_at', null).order('created_at', { ascending: false }).limit(1),
+      ) as { id: string; name: string; let_out_at: string; created_at: string }[];
+      const e = rows[0];
+      return e ? { id: e.id, name: e.name, letOutAt: Date.parse(e.let_out_at), createdAt: Date.parse(e.created_at) } : null;
+    },
+    async startEvent(e) {
+      check(
+        await db()
+          .from('lot_events')
+          .insert({ id: e.id, company_id: companyId, name: e.name, let_out_at: new Date(e.letOutAt).toISOString(), created_by: userId }),
+      );
+    },
+    async updateEvent(id, patch) {
+      check(await db().from('lot_events').update({ name: patch.name, let_out_at: new Date(patch.letOutAt).toISOString() }).eq('id', id));
+    },
+    async endEvent(id) {
+      check(await db().from('lot_events').update({ ended_at: new Date().toISOString() }).eq('id', id));
+    },
+    async carsOutSince(since) {
+      const n = check(await db().rpc('cars_out_since', { company: companyId, since: new Date(since).toISOString() }));
+      return typeof n === 'number' ? n : 0;
     },
     async unretrieveCar(car) {
       check(
@@ -446,6 +473,7 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'parked_cars', filter: `company_id=eq.${companyId}` }, on.cars)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'lot_maps', filter: `company_id=eq.${companyId}` }, on.maps)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'requests', filter: `company_id=eq.${companyId}` }, () => on.requests?.())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'lot_events', filter: `company_id=eq.${companyId}` }, () => on.event?.())
         .subscribe((status) => {
           // changes made while disconnected are not replayed, so reload after every (re)join
           if (status === 'SUBSCRIBED') {
@@ -453,6 +481,7 @@ export function cloudSource(companyId: string, userId: string, userName: string)
             on.cars();
             on.maps();
             on.requests?.();
+            on.event?.();
           } else on.live?.(false);
         });
       return () => {

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CarDetails } from '../data/source';
 import { CAR_COLORS, CAR_MAKES, carMatches, colorHex, formatElapsed, nextOpenSpot } from '../ops';
-import type { CarRequest, ParkedCar, Spot } from '../types';
+import type { CarRequest, LotEvent, ParkedCar, Spot } from '../types';
+import { EventCard } from './EventMode';
 import { carsWithKeysOut, hookTaken, keyHook, KEYS_LATE_MS } from '../keys';
 import { matchPlate } from '../plates';
 import { blockedBy, blockersOf, carsNear } from '../stacks';
@@ -15,8 +16,15 @@ interface Props extends RequestActions {
   /** open and claimed requests for this lot */
   requests: CarRequest[];
   me: string;
-  onRequest: (car: ParkedCar) => void;
-  onRequestTag: (tag: string) => string | null;
+  onRequest: (car: ParkedCar, dueAt?: number) => void;
+  onRequestTag: (tag: string, dueAt?: number) => string | null;
+  /** event mode: the event, cars out since its let-out, and where the stand is on this lot */
+  event: LotEvent | null;
+  outSince: number;
+  stand: { x: number; y: number };
+  onEditEvent: () => void;
+  /** the let-out time while it's still ahead */
+  preUntil?: number;
   /** show the guest's QR and link (team accounts only) */
   onGuestLink?: (car: ParkedCar) => void;
   /** walkaround damage photos */
@@ -219,6 +227,21 @@ export function LivePanel(p: Props) {
         </div>
       </div>
 
+      {p.event && (
+        <EventCard
+          event={p.event}
+          cars={p.allCars}
+          spots={p.spots}
+          mapCars={p.cars}
+          stand={p.stand}
+          requests={p.requests}
+          outSince={p.outSince}
+          onEdit={p.onEditEvent}
+          onFind={p.onFind}
+          onStartMove={(c) => p.onStartMove(c)}
+        />
+      )}
+
       <RequestQueue
         {...p}
         onFocus={(c) => {
@@ -334,6 +357,15 @@ export function LivePanel(p: Props) {
           </dl>
           {request ? (
             <RequestStatus {...p} r={request} car={car} />
+          ) : p.preUntil ? (
+            <div className="request-pair">
+              <button className="big request-btn" onClick={() => p.onRequest(car)}>
+                Request now
+              </button>
+              <button className="big request-later" onClick={() => p.onRequest(car, p.preUntil)}>
+                At let-out
+              </button>
+            </div>
           ) : (
             <button className="big request-btn" onClick={() => p.onRequest(car)}>
               Request car

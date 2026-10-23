@@ -1918,3 +1918,168 @@ button.retake {
   font-weight: 700;
   font-size: 12px;
 }
+
+/* ---------- event mode ---------- */
+.event-pill,
+.full-pill {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: #2a1f45;
+  border: 1px solid #7c5cd6;
+  color: #e4d9ff;
+  box-shadow: 0 4px 14px #0007;
+}
+.event-pill.soon {
+  background: #4a2a10;
+  border-color: #ff9f43;
+  color: #ffd9b0;
+}
+.event-pill.out {
+  background: #4a1418;
+  border-color: var(--red);
+  color: #ffd0d2;
+  animation: pill-pulse 1.6s ease-in-out infinite;
+}
+@keyframes pill-pulse {
+  50% {
+    box-shadow: 0 0 0 6px #e5484d33;
+  }
+}
+.full-pill {
+  background: #4a1418;
+  border-color: var(--red);
+  color: #ffd0d2;
+}
+.event-card {
+  border-color: #7c5cd6;
+  background: linear-gradient(#2a1f45, var(--panel) 70%);
+}
+.event-card.out {
+  border-color: var(--red);
+  background: linear-gradient(#3a1518, var(--panel) 70%);
+}
+.event-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.event-name {
+  font-weight: 800;
+  font-size: 15px;
+}
+.countdown {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 6px 0 10px;
+}
+.countdown b {
+  font-size: 40px;
+  line-height: 1;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1px;
+}
+.countdown span {
+  color: var(--muted);
+}
+.event-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+  gap: 6px;
+}
+.event-stats > div {
+  background: #0003;
+  border-radius: 10px;
+  padding: 8px;
+}
+.event-stats b {
+  display: block;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.event-stats span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.event-card h4 {
+  margin: 14px 0 2px;
+  font-size: 13px;
+}
+.event-card .hint {
+  margin: 0 0 8px;
+}
+.stage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.stage-list li {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.stage-list .stage-car {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+}
+.stage-list li.done {
+  opacity: 0.55;
+}
+.request-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+button.request-later {
+  background: #2a1f45;
+  border-color: #7c5cd6;
+  color: #e4d9ff;
+  font-weight: 800;
+}
+.ahead-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 10px;
+  color: #cdb9ff;
+  font-size: 13px;
+}
+.ahead-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #7c5cd6;
+}
+.req.pre {
+  border-left-color: #b18cff;
+}
+.event-dialog {
+  max-width: 420px;
+}
+.event-dialog .actions {
+  justify-content: space-between;
+}
+button.danger-text {
+  color: #ff8a8d;
+}
+/* the event or lot-full pill sits top left; toasts and the connection notice drop below it */
+.stage.has-pill .toast {
+  top: 62px;
+}
+.stage.has-pill .conn {
+  top: 108px;
+}

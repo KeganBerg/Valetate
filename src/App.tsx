@@ -18,7 +18,9 @@ import { liveRequests, newGuestToken } from './requests';
 import { GuestLinkDialog } from './components/GuestLink';
 import { PhotoSheet } from './components/PhotoSheet';
 import { createPhotoQueue } from './photoQueue';
-import type { CarRequest, LotMap, MapItem, ParkedCar, Spot } from './types';
+import type { CarRequest, LotEvent, LotMap, MapItem, ParkedCar, Spot } from './types';
+import { almostFull, isPre, standPoint } from './surge';
+import { EventDialog, EventPill } from './components/EventMode';
 
 function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean } {
   const id = currentMapId();
@@ -198,23 +200,88 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   }, [source, flash]);
   const carsRef = useRef(cars);
   carsRef.current = cars;
+
+  // event mode: one shared let-out countdown for the whole crew
+  const [event, setEvent] = useState<LotEvent | null>(null);
+  const [eventDialog, setEventDialog] = useState(false);
+  const [outSince, setOutSince] = useState(0);
+  const refreshEvent = useCallback(async () => {
+    const e = await source.getEvent().catch(() => undefined);
+    if (e !== undefined) setEvent(e);
+  }, [source]);
+  useEffect(() => {
+    refreshEvent();
+  }, [refreshEvent]);
   useEffect(() => {
     refreshRequests();
   }, [refreshRequests]);
+  // a car asked for "at the let-out" follows the let-out if it's moved; once the event ends it's just a request
+  const timedRequests = useMemo(
+    () => (event ? requests.map((r) => (r.dueAt ? { ...r, dueAt: event.letOutAt } : r)) : requests.map((r) => (r.dueAt ? { ...r, dueAt: null } : r))),
+    [requests, event],
+  );
   const mapRequests = useMemo(
-    () => liveRequests(requests, new Set(mapCars.map((c) => c.id))),
-    [requests, mapCars],
+    () => liveRequests(timedRequests, new Set(mapCars.map((c) => c.id))),
+    [timedRequests, mapCars],
   );
   const requestedSpots = useMemo(() => {
     const byCar = new Map(mapCars.map((c) => [c.id, c.spotKey]));
-    return new Map(mapRequests.map((r) => [byCar.get(r.carId)!, r.status]));
-  }, [mapRequests, mapCars]);
+    return new Map(mapRequests.map((r) => [byCar.get(r.carId)!, isPre(r, now) ? ('pre' as const) : r.status]));
+  }, [mapRequests, mapCars, now]);
   /** spots holding cars that must move before a requested car can get out */
   const mustMoveSpots = useMemo(() => {
     const keys = new Set<string>();
     for (const r of mapRequests) if (r.status !== 'ready') for (const c of blockersOf(mapCars, r.carId)) keys.add(c.spotKey);
     return keys;
   }, [mapRequests, mapCars]);
+  // where the stand is on this lot (the valet booth), for staging during an event
+  const stand = useMemo(
+    () => standPoint(map.items, { x: map.width / 2, y: map.height }),
+    [map.items, map.width, map.height],
+  );
+
+  // the let-out pace: how many cars have left since it started
+  const letOut = event?.letOutAt ?? 0;
+  const lettingOut = !!event && now >= letOut;
+  useEffect(() => {
+    if (!lettingOut) return setOutSince(0);
+    let stop = false;
+    const check = () => source.carsOutSince(letOut).then((n) => !stop && setOutSince(n), () => {});
+    check();
+    const t = window.setInterval(check, 20000);
+    return () => {
+      stop = true;
+      window.clearInterval(t);
+    };
+  }, [source, lettingOut, letOut, cars.length]);
+
+  // say so when the let-out starts, once per event
+  const announced = useRef<string | null>(null);
+  useEffect(() => {
+    if (!event || !lettingOut || announced.current === event.id) return;
+    const first = announced.current === null && now - letOut > 60_000;
+    announced.current = event.id;
+    if (first) return; // opened the app mid let-out: nothing new to announce
+    const due = timedRequests.filter((r) => r.dueAt && r.status === 'open').length;
+    flash(`${event.name || 'The event'} is letting out${due ? ` · ${due} asked-ahead ${due === 1 ? 'car is' : 'cars are'} due now` : ''}`);
+    navigator.vibrate?.([200, 80, 200, 80, 200]);
+  }, [event, lettingOut, letOut, now, timedRequests, flash]);
+
+  // lot nearly full: say so once as it fills, and point at the lot with the most room
+  const openSpots = spots.length - mapCars.filter((c) => spots.some((s) => s.key === c.spotKey)).length;
+  const lotFull = mode === 'live' && almostFull(openSpots, spots.length);
+  const wasFull = useRef(false);
+  useEffect(() => {
+    if (lotFull && !wasFull.current) {
+      const room = maps
+        .filter((m) => m.id !== map.id)
+        .map((m) => ({ m, open: listSpots(m.items).length - cars.filter((c) => c.mapId === m.id).length }))
+        .sort((a, b) => b.open - a.open)[0];
+      flash(`${map.name} is almost full: ${openSpots} open${room && room.open > 0 ? ` · ${room.m.name} has ${room.open}` : ''}`);
+    }
+    wasFull.current = lotFull;
+  }, [lotFull]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const patchRequest = (id: string, patch: Partial<CarRequest>) =>
     setRequests((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
@@ -236,6 +303,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
       source.subscribe({
         cars: refreshCars,
         requests: refreshRequests,
+        event: refreshEvent,
         live: setLive,
         maps: async () => {
           const ms = await source.listMaps().catch(() => null);
@@ -249,7 +317,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
           }
         },
       }),
-    [source, refreshCars, refreshRequests],
+    [source, refreshCars, refreshRequests, refreshEvent],
   );
 
   // a phone that slept or lost signal missed changes: catch up as soon as it's back
@@ -465,8 +533,9 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     });
   };
 
-  const requestCar = (car: ParkedCar) => {
+  const requestCar = (car: ParkedCar, dueAt?: number) => {
     const r: CarRequest = {
+      dueAt: dueAt ?? null,
       id: uid(),
       carId: car.id,
       mapId: car.mapId,
@@ -484,7 +553,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     setRequests((rs) => [...rs, r]);
     run(source.createRequest(r), () => setRequests((rs) => rs.filter((x) => x.id !== r.id))).then(refreshRequests);
     setNow(Date.now());
-    flash(`${carName(car)} requested`);
+    flash(dueAt ? `${carName(car)} asked for at the let-out` : `${carName(car)} requested`);
   };
 
   const centerOn = (s: Spot) => {
@@ -700,6 +769,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             {account?.onTeam && <button onClick={account.onTeam}>Team and roles</button>}
             {account?.onSwitchCompany && <button onClick={account.onSwitchCompany}>Switch company</button>}
             {account && <hr />}
+            {mode === 'live' && <button onClick={() => setEventDialog(true)}>{event ? 'Event: change let-out time' : 'Start event mode'}</button>}
             <button onClick={() => exportPng(map).catch((e) => flash(e.message))}>Save map as image (PNG)</button>
             <button onClick={() => exportSvg(map)}>Save map as vector (SVG)</button>
             <button onClick={() => exportJson(map)}>Export map file</button>
@@ -715,7 +785,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
 
       <main>
         {mode === 'edit' && <Palette onAdd={(a) => addAsset(a)} open={panel === 'palette'} onClose={() => setPanel('none')} />}
-        <div className="stage" ref={stageRef}>
+        <div className={`stage ${mode === 'live' && (event || lotFull) ? 'has-pill' : ''}`} ref={stageRef}>
           <Canvas
             map={map}
             selected={selected}
@@ -756,11 +826,17 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             )}
             <button className={panel === 'inspector' ? 'on' : ''} onClick={() => setPanel(panel === 'inspector' ? 'none' : 'inspector')}>
               {mode === 'edit' ? 'Properties' : 'Cars'}
-              {mode === 'live' && mapRequests.some((r) => r.status === 'open') && (
-                <span className="tab-badge">{mapRequests.filter((r) => r.status === 'open').length}</span>
+              {mode === 'live' && mapRequests.some((r) => r.status === 'open' && !isPre(r, now)) && (
+                <span className="tab-badge">{mapRequests.filter((r) => r.status === 'open' && !isPre(r, now)).length}</span>
               )}
             </button>
           </div>
+          {mode === 'live' && event && <EventPill event={event} onOpen={() => setPanel('inspector')} />}
+          {mode === 'live' && lotFull && !event && (
+            <div className="full-pill" role="status">
+              Lot almost full · {openSpots} open
+            </div>
+          )}
           {toast && (
             <div className={`toast ${toast.undo ? 'with-action' : ''}`} role="status">
               {toast.msg}
@@ -846,13 +922,18 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             requests={mapRequests}
             me={source.me.id}
             onRequest={requestCar}
-            onRequestTag={(tag) => {
+            event={event}
+            outSince={outSince}
+            stand={stand}
+            onEditEvent={() => setEventDialog(true)}
+            preUntil={event && event.letOutAt > now ? event.letOutAt : undefined}
+            onRequestTag={(tag, dueAt) => {
               const t = tag.replace(/^#/, '').trim().toLowerCase();
               const car = mapCars.find((c) => c.ticket.trim().toLowerCase() === t) ?? cars.find((c) => c.ticket.trim().toLowerCase() === t);
               if (!car) return `No car with tag #${tag} is parked`;
               if (car.mapId !== map.id) return `#${tag} is on another lot`;
               if (requests.some((r) => r.carId === car.id)) return `#${tag} is already requested`;
-              requestCar(car);
+              requestCar(car, dueAt);
               return null;
             }}
             onGuestLink={source.kind === 'cloud' ? setGuestLinkCar : undefined}
@@ -891,6 +972,27 @@ export default function App({ source, role, account, initialMaps, initialCars }:
         )}
       </main>
 
+      {eventDialog && (
+        <EventDialog
+          event={event}
+          onClose={() => setEventDialog(false)}
+          onSave={(e) => {
+            const fresh = !event;
+            setEvent(e);
+            setEventDialog(false);
+            run(fresh ? source.startEvent(e) : source.updateEvent(e.id, e)).then(refreshEvent);
+            flash(fresh ? `Event mode on: let-out at ${new Date(e.letOutAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Let-out time saved');
+            setPanel('inspector');
+          }}
+          onEnd={() => {
+            if (!event) return;
+            setEvent(null);
+            setEventDialog(false);
+            run(source.endEvent(event.id)).then(refreshEvent);
+            flash('Event ended');
+          }}
+        />
+      )}
       {photoCar && <PhotoSheet car={photoCar} source={source} queue={photoQueue} onClose={() => setPhotoCar(null)} />}
       {guestLinkCar && <GuestLinkDialog car={guestLinkCar} company={account?.companyName} onClose={() => setGuestLinkCar(null)} />}
 

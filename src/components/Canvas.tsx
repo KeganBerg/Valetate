@@ -64,13 +64,13 @@ interface Props {
   now: number;
   activeSpot: string | null;
   /** live mode: spots whose car has been asked for, by Spot.key */
-  requested?: Map<string, 'open' | 'claimed' | 'ready'>;
+  requested?: Map<string, 'open' | 'claimed' | 'ready' | 'pre'>;
   /** live mode: spots whose car must move before a requested car can get out */
   mustMove?: Set<string>;
   onSpotClick: (spot: Spot | null) => void;
 }
 
-const REQ_COLOR = { open: '#ffb020', claimed: '#4da3ff', ready: '#34c759' } as const;
+const REQ_COLOR = { open: '#ffb020', claimed: '#4da3ff', ready: '#34c759', pre: '#b18cff' } as const;
 
 const clampZ = (z: number) => Math.min(MAX_Z, Math.max(MIN_Z, z));
 

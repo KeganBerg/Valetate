@@ -1,5 +1,6 @@
 import { loadCars, saveCars } from '../ops';
 import { loadRequests, saveRequests } from '../requests';
+import { loadEvent, logRetrieval, retrievalsSince, saveEvent } from '../surge';
 import { localPhotos } from './photoStore';
 import { deleteMap, loadMaps, saveMap } from '../storage';
 import type { DataSource } from './source';
@@ -27,6 +28,7 @@ export const localSource: DataSource = {
     ),
   setBlocks: async (id, blocks) => saveCars(loadCars().map((c) => (c.id === id ? { ...c, blocks } : c))),
   retrieveCar: async (id) => {
+    logRetrieval(Date.now());
     saveCars(loadCars().filter((c) => c.id !== id));
     saveRequests(loadRequests().filter((r) => r.carId !== id));
   },
@@ -51,6 +53,14 @@ export const localSource: DataSource = {
   markReady: async (id) =>
     saveRequests(loadRequests().map((x) => (x.id === id ? { ...x, status: 'ready', readyAt: Date.now() } : x))),
   cancelRequest: async (id) => saveRequests(loadRequests().filter((x) => x.id !== id)),
+  getEvent: async () => loadEvent(),
+  startEvent: async (e) => saveEvent(e),
+  updateEvent: async (id, patch) => {
+    const e = loadEvent();
+    if (e?.id === id) saveEvent({ ...e, ...patch });
+  },
+  endEvent: async () => saveEvent(null),
+  carsOutSince: async (since) => retrievalsSince(since),
   unretrieveCar: async (car) => saveCars([...loadCars().filter((c) => c.id !== car.id), car]),
   listPhotos: (carId) => localPhotos.list(carId),
   addPhoto: ({ id, car, side, blob, takenAt }) =>
@@ -62,6 +72,7 @@ export const localSource: DataSource = {
       if (e.key?.startsWith('valetate.maps')) on.maps();
       if (e.key?.startsWith('valetate.cars')) on.cars();
       if (e.key?.startsWith('valetate.requests')) on.requests?.();
+      if (e.key?.startsWith('valetate.event')) on.event?.();
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);

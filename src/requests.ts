@@ -26,9 +26,13 @@ export const LATE_MS = 5 * 60 * 1000;
 
 const ORDER: Record<CarRequest['status'], number> = { open: 0, claimed: 1, ready: 2 };
 
-/** nobody's-got-it first, then cars on their way, then cars already at the stand; oldest first within each */
-export function sortQueue(list: CarRequest[]): CarRequest[] {
-  return [...list].sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.createdAt - b.createdAt);
+/**
+ * nobody's-got-it first, then cars on their way, then cars already at the stand,
+ * then cars asked for ahead of an event's let-out; oldest first within each
+ */
+export function sortQueue(list: CarRequest[], now = Date.now()): CarRequest[] {
+  const rank = (r: CarRequest) => (r.status === 'open' && r.dueAt && r.dueAt > now ? 3 : ORDER[r.status]);
+  return [...list].sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt);
 }
 
 /** drop requests for cars that are gone (retrieved on another device, map deleted) */

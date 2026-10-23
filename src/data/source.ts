@@ -1,4 +1,4 @@
-import type { CarPhoto, CarRequest, LotMap, ParkedCar, PhotoSide } from '../types';
+import type { CarPhoto, CarRequest, LotEvent, LotMap, ParkedCar, PhotoSide } from '../types';
 import type { Outbox } from './outbox';
 
 export type CarDetails = Partial<
@@ -54,11 +54,18 @@ export interface DataSource {
   /** store an already-shrunk JPEG; `id` is chosen by the caller so a retry can't duplicate it */
   addPhoto(photo: { id: string; car: ParkedCar; side: PhotoSide; blob: Blob; takenAt: number }): Promise<CarPhoto>;
   setPhotoDamage(id: string, damage: boolean): Promise<void>;
+  /** the event running now, if any */
+  getEvent(): Promise<LotEvent | null>;
+  startEvent(e: LotEvent): Promise<void>;
+  updateEvent(id: string, patch: Pick<LotEvent, 'name' | 'letOutAt'>): Promise<void>;
+  endEvent(id: string): Promise<void>;
+  /** cars that left the lot since `since`, for the let-out pace */
+  carsOutSince(since: number): Promise<number>;
   /** put a car marked retrieved by mistake back on its spot */
   unretrieveCar(car: ParkedCar): Promise<void>;
   /**
    * called when another device changes maps, cars or requests; `live` reports whether
    * changes are arriving (false while the connection is down)
    */
-  subscribe(on: { maps: () => void; cars: () => void; requests?: () => void; live?: (live: boolean) => void }): () => void;
+  subscribe(on: { maps: () => void; cars: () => void; requests?: () => void; event?: () => void; live?: (live: boolean) => void }): () => void;
 }
