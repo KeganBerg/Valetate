@@ -15,6 +15,8 @@ interface Props extends RequestActions {
   onRequestTag: (tag: string) => string | null;
   /** show the guest's QR and link (team accounts only) */
   onGuestLink?: (car: ParkedCar) => void;
+  /** walkaround damage photos */
+  onPhotos: (car: ParkedCar) => void;
   spots: Spot[];
   /** cars on this map */
   cars: ParkedCar[];
@@ -251,6 +253,7 @@ export function LivePanel(p: Props) {
             Car retrieved
           </button>
           <div className="actions">
+            <button onClick={() => p.onPhotos(car)}>📷 Photos</button>
             {p.onGuestLink && car.guestToken && <button onClick={() => p.onGuestLink!(car)}>Guest link</button>}
             <button onClick={() => p.onStartMove(car)}>Move</button>
             <button onClick={() => setEditing({ ...EMPTY, ...car })}>

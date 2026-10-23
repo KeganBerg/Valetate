@@ -1,4 +1,4 @@
-import type { CarRequest, LotMap, ParkedCar } from '../types';
+import type { CarPhoto, CarRequest, LotMap, ParkedCar, PhotoSide } from '../types';
 
 export type CarDetails = Partial<
   Pick<ParkedCar, 'plate' | 'color' | 'make' | 'vehicle' | 'ownerName' | 'ownerPhone' | 'ticket' | 'notes'>
@@ -42,6 +42,11 @@ export interface DataSource {
   /** the car is at the stand; the guest's page says so */
   markReady(id: string): Promise<void>;
   cancelRequest(id: string): Promise<void>;
+  /** walkaround photos for a car, oldest first */
+  listPhotos(carId: string): Promise<CarPhoto[]>;
+  /** store an already-shrunk JPEG; `id` is chosen by the caller so a retry can't duplicate it */
+  addPhoto(photo: { id: string; car: ParkedCar; side: PhotoSide; blob: Blob; takenAt: number }): Promise<CarPhoto>;
+  setPhotoDamage(id: string, damage: boolean): Promise<void>;
   /** put a car marked retrieved by mistake back on its spot */
   unretrieveCar(car: ParkedCar): Promise<void>;
   /**

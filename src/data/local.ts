@@ -1,5 +1,6 @@
 import { loadCars, saveCars } from '../ops';
 import { loadRequests, saveRequests } from '../requests';
+import { localPhotos } from './photoStore';
 import { deleteMap, loadMaps, saveMap } from '../storage';
 import type { DataSource } from './source';
 
@@ -44,6 +45,10 @@ export const localSource: DataSource = {
     saveRequests(loadRequests().map((x) => (x.id === id ? { ...x, status: 'ready', readyAt: Date.now() } : x))),
   cancelRequest: async (id) => saveRequests(loadRequests().filter((x) => x.id !== id)),
   unretrieveCar: async (car) => saveCars([...loadCars().filter((c) => c.id !== car.id), car]),
+  listPhotos: (carId) => localPhotos.list(carId),
+  addPhoto: ({ id, car, side, blob, takenAt }) =>
+    localPhotos.put({ id, carId: car.id, side, blob, takenAt, damage: false, note: '', takenByName: 'You' }),
+  setPhotoDamage: (id, damage) => localPhotos.setDamage(id, damage),
   subscribe(on) {
     // other tabs on this device
     const onStorage = (e: StorageEvent) => {

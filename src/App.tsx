@@ -14,6 +14,8 @@ import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
 import { liveRequests, newGuestToken } from './requests';
 import { GuestLinkDialog } from './components/GuestLink';
+import { PhotoSheet } from './components/PhotoSheet';
+import { createPhotoQueue } from './photoQueue';
 import type { CarRequest, LotMap, MapItem, ParkedCar, Spot } from './types';
 
 function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean } {
@@ -168,6 +170,8 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   // retrieval requests, and a heads-up when a new one comes in from another device
   const [requests, setRequests] = useState<CarRequest[]>([]);
   const [guestLinkCar, setGuestLinkCar] = useState<ParkedCar | null>(null);
+  const [photoCar, setPhotoCar] = useState<ParkedCar | null>(null);
+  const photoQueue = useMemo(() => createPhotoQueue(source), [source]);
   const seenRequests = useRef<Set<string> | null>(null);
   const refreshRequests = useCallback(async () => {
     const list = await source.listRequests().catch(() => null);
@@ -786,6 +790,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
               return null;
             }}
             onGuestLink={source.kind === 'cloud' ? setGuestLinkCar : undefined}
+            onPhotos={setPhotoCar}
             onClaim={(r) => {
               patchRequest(r.id, { status: 'claimed', claimedBy: source.me.id, claimedByName: source.me.name, claimedAt: Date.now() });
               run(source.claimRequest(r.id)).then(refreshRequests);
@@ -812,6 +817,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
         )}
       </main>
 
+      {photoCar && <PhotoSheet car={photoCar} source={source} queue={photoQueue} onClose={() => setPhotoCar(null)} />}
       {guestLinkCar && <GuestLinkDialog car={guestLinkCar} company={account?.companyName} onClose={() => setGuestLinkCar(null)} />}
 
       {showMaps && (
