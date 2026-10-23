@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CarDetails } from '../data/source';
 import { CAR_COLORS, CAR_MAKES, carMatches, colorHex, formatElapsed, nextOpenSpot } from '../ops';
-import type { ParkedCar, Spot } from '../types';
+import type { CarRequest, ParkedCar, Spot } from '../types';
+import { RequestQueue, RequestStatus, type RequestActions } from './RequestQueue';
 import { SheetHandle } from './SheetHandle';
 
 type NewCar = Omit<ParkedCar, 'id' | 'mapId' | 'spotKey' | 'spotLabel' | 'parkedAt'>;
 
-interface Props {
+interface Props extends RequestActions {
+  /** open and claimed requests for this lot */
+  requests: CarRequest[];
+  me: string;
+  onRequest: (car: ParkedCar) => void;
   spots: Spot[];
   cars: ParkedCar[];
   active: Spot | null;
@@ -111,6 +116,7 @@ export function LivePanel(p: Props) {
 
   const bySpot = new Map(p.cars.map((c) => [c.spotKey, c]));
   const car = p.active ? bySpot.get(p.active.key) : undefined;
+  const request = car ? p.requests.find((r) => r.carId === car.id) : undefined;
   const spotByKey = new Map(p.spots.map((s) => [s.key, s]));
   const taken = new Set(p.cars.map((c) => c.spotKey));
   const openSpot = nextOpenSpot(p.spots, taken, p.active?.key);
@@ -136,6 +142,14 @@ export function LivePanel(p: Props) {
           <b>{Math.max(0, p.spots.length - p.cars.length)}</b> open
         </div>
       </div>
+
+      <RequestQueue
+        {...p}
+        onFocus={(c) => {
+          const s = spotByKey.get(c.spotKey);
+          if (s) p.onFocus(s);
+        }}
+      />
 
       {p.moving && (
         <div className="moving">
@@ -187,6 +201,13 @@ export function LivePanel(p: Props) {
               </>
             )}
           </dl>
+          {request ? (
+            <RequestStatus {...p} r={request} car={car} />
+          ) : (
+            <button className="big request-btn" onClick={() => p.onRequest(car)}>
+              Request car
+            </button>
+          )}
           <button className="primary big" onClick={() => p.onRetrieve(car)}>
             Car retrieved
           </button>

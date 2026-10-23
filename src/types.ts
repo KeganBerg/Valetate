@@ -98,3 +98,17 @@ export interface ParkedCar {
   notes: string;
   parkedAt: number;
 }
+
+/** Someone asked for a parked car; a valet claims it and brings it up. */
+export interface CarRequest {
+  id: string;
+  carId: string;
+  mapId: string;
+  status: 'open' | 'claimed';
+  note: string;
+  createdAt: number;
+  createdByName: string;
+  claimedBy: string;
+  claimedByName: string;
+  claimedAt: number | null;
+}
