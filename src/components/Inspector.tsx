@@ -69,6 +69,7 @@ function Colors({ value, onChange }: { value: string; onChange: (c: string) => v
             style={{ background: c }}
             onClick={() => onChange(c)}
             aria-label={`Color ${c}`}
+            aria-pressed={c.toLowerCase() === value.toLowerCase()}
           />
         ))}
         <input type="color" value={value} onChange={(e) => onChange(e.target.value)} aria-label="Custom color" />
