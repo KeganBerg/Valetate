@@ -3,6 +3,7 @@ import type { CarPhoto, CarRequest, Feedback, Incident, LotMap, PlateHistory, Ma
 import { MapConflict, type CarDetails, type DataSource, type Role } from './source';
 import type { RequestVisit } from '../report';
 import { lookupKey } from '../guests';
+import { NO_RATES, type PayMethod, type Payment, type Rates, type Validation } from '../payments';
 import { plateKey } from '../plates';
 import type { VehicleProfile } from '../types';
 
@@ -20,6 +21,35 @@ function check<T>(res: { data: T; error: { message: string } | null }): T {
   if (res.error) throw new Error(res.error.message);
   return res.data;
 }
+
+interface PaymentRow {
+  id: string;
+  car_id: string | null;
+  ticket: string;
+  amount_cents: number;
+  fee_cents: number;
+  method: PayMethod;
+  code: string;
+  note: string;
+  taken_by: string | null;
+  taken_by_name: string;
+  created_at: string;
+  voided_at: string | null;
+}
+const paymentOf = (r: PaymentRow): Payment => ({
+  id: r.id,
+  carId: r.car_id ?? '',
+  ticket: r.ticket,
+  amountCents: r.amount_cents,
+  feeCents: r.fee_cents,
+  method: r.method,
+  code: r.code,
+  note: r.note,
+  takenBy: r.taken_by ?? '',
+  takenByName: r.taken_by_name,
+  createdAt: Date.parse(r.created_at),
+  voided: !!r.voided_at,
+});
 
 interface FeedbackRow {
   id: string;
@@ -612,6 +642,56 @@ export function cloudSource(companyId: string, userId: string, userName: string)
     async setTipUrl(url) {
       check(await db().from('companies').update({ tip_url: url }).eq('id', companyId));
     },
+    async getRates() {
+      const rows = check(await db().from('companies').select('rates').eq('id', companyId)) as { rates: Partial<Rates> | null }[];
+      return { ...NO_RATES, ...(rows[0]?.rates ?? {}) };
+    },
+    async setRates(rates) {
+      check(await db().from('companies').update({ rates }).eq('id', companyId));
+    },
+    async listValidations() {
+      const rows = check(await db().from('validations').select('*').eq('company_id', companyId).order('created_at')) as (Validation & { company_id: string })[];
+      return rows.map((r) => ({ id: r.id, code: r.code, label: r.label, kind: r.kind, value: r.value, active: r.active }));
+    },
+    async saveValidation(v) {
+      const res = await db().from('validations').upsert({ id: v.id, company_id: companyId, code: v.code, label: v.label, kind: v.kind, value: v.value, active: v.active });
+      if (res.error?.code === '23505') throw new Error(`There's already a code ${v.code}`);
+      check(res);
+    },
+    async listPayments(since) {
+      const rows = check(
+        await db().from('payments').select('*').eq('company_id', companyId).gte('created_at', new Date(since).toISOString()).order('created_at'),
+      ) as PaymentRow[];
+      return rows.map(paymentOf);
+    },
+    async takePayment(p) {
+      const res = await db()
+        .from('payments')
+        .insert({
+          id: p.id,
+          company_id: companyId,
+          car_id: p.carId,
+          ticket: p.ticket,
+          amount_cents: p.amountCents,
+          fee_cents: p.feeCents,
+          method: p.method,
+          code: p.code,
+          note: p.note,
+          taken_by: userId,
+          taken_by_name: userName,
+          created_at: new Date(p.createdAt).toISOString(),
+        });
+      // the same payment sent twice (a retry) is fine; a second payment for the car is not
+      if (res.error?.code === '23505') {
+        const mine = check(await db().from('payments').select('id').eq('id', p.id)) as { id: string }[];
+        if (mine.length) return;
+        throw new Error('This car is already paid');
+      }
+      check(res);
+    },
+    async voidPayment(id) {
+      check(await db().from('payments').update({ voided_at: new Date().toISOString(), voided_by: userId }).eq('id', id));
+    },
     async lookupPlate(plate) {
       if (!lookupKey(plate)) return null;
       const r = check(await db().rpc('vehicle_lookup', { company: companyId, plate })) as VehicleLookup | null;
@@ -734,7 +814,7 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         closed_at: string | null;
       };
       const ms = (t: string | null) => (t ? Date.parse(t) : null);
-      const [cars, reqs, tips, shifts, people, feedback] = await Promise.all([
+      const [cars, reqs, tips, shifts, people, feedback, payments] = await Promise.all([
         all<CarRow>((a, b) =>
           db()
             .from('parked_cars')
@@ -758,6 +838,9 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         team.members(companyId).catch(() => [] as Member[]),
         all<FeedbackRow>((a, b) =>
           db().from('feedback').select('*').eq('company_id', companyId).gte('created_at', iso).order('created_at').range(a, b),
+        ),
+        all<PaymentRow>((a, b) =>
+          db().from('payments').select('*').eq('company_id', companyId).gte('created_at', iso).order('created_at').range(a, b),
         ),
       ]);
       return {
@@ -786,6 +869,7 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         shifts,
         people: Object.fromEntries(people.map((m) => [m.user_id, m.display_name || m.email.split('@')[0]])),
         feedback: feedback.map(feedbackOf),
+        payments: payments.map(paymentOf),
       };
     },
     async unretrieveCar(car) {
@@ -839,6 +923,8 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts', filter: `company_id=eq.${companyId}` }, () => on.team?.())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tips', filter: `company_id=eq.${companyId}` }, () => on.team?.())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents', filter: `company_id=eq.${companyId}` }, () => on.incidents?.())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'payments', filter: `company_id=eq.${companyId}` }, () => on.payments?.())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'validations', filter: `company_id=eq.${companyId}` }, () => on.payments?.())
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'feedback', filter: `company_id=eq.${companyId}` }, (p) =>
           on.feedback?.(feedbackOf(p.new as FeedbackRow)),
         )

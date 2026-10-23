@@ -3,6 +3,7 @@ import type { DataSource } from '../data/source';
 import { buildReport, hourText, valetCsv, waitText, type Report, type ReportData } from '../report';
 import { dayStart, money } from '../shifts';
 import { useDialog } from '../dialog';
+import { methodInfo, type PaymentSummary } from '../payments';
 
 type Range = 'today' | 'week' | 'month';
 const RANGES: { id: Range; label: string }[] = [
@@ -203,11 +204,51 @@ export function Dashboard({ source, onClose }: { source: DataSource; onClose: ()
               </p>
             </section>
 
+            {r.payments && <Payments s={r.payments} />}
+
             {r.guests && <GuestRatings g={r.guests} />}
           </>
         )}
       </div>
     </div>
+  );
+}
+
+/** Parking money: what was collected, how, and what was given away. */
+function Payments({ s }: { s: PaymentSummary }) {
+  const room = s.byMethod.find((m) => m.method === 'room');
+  const top = Math.max(1, ...s.byMethod.map((m) => m.count));
+  return (
+    <section className="dash-section">
+      <h3>Parking payments</h3>
+      <div className="pay-sum">
+        <div className="kpi">
+          <span>Collected</span>
+          <b>{money(s.collectedCents)}</b>
+          <small>{room ? `plus ${money(room.cents)} to rooms` : 'card and cash'}</small>
+        </div>
+        <div className="kpi">
+          <span>Given away</span>
+          <b>{money(Math.max(0, s.feesCents - s.collectedCents - (room?.cents ?? 0)))}</b>
+          <small>
+            {s.validated} validated · {s.comped} comped
+          </small>
+        </div>
+      </div>
+      <ul className="rating-dist pay-dist" aria-label="By how they paid">
+        {s.byMethod.map((m) => (
+          <li key={m.method}>
+            <span>{methodInfo(m.method).label}</span>
+            <i>
+              <i style={{ width: `${(m.count / top) * 100}%` }} />
+            </i>
+            <span>
+              {m.count} · {money(m.cents)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

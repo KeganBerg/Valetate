@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from './data/supabase';
 import { colorHex, formatElapsed } from './ops';
+import { dollars, feeFor, NO_RATES, type Rates } from './payments';
 
 interface GuestCar {
   company: string;
@@ -17,6 +18,10 @@ interface GuestCar {
     claimed_by_name: string;
     ready_at: string | null;
   } | null;
+  /** what the stand charges, when the car came in, and whether it's paid: the page works out what's owed so far */
+  rates?: Partial<Rates> | null;
+  parked_at?: string;
+  paid?: boolean;
   /** their answer to the one question after pickup */
   feedback?: { rating: number; comment: string } | null;
 }
@@ -106,6 +111,7 @@ export default function GuestPage({ token }: { token: string }) {
               </span>
             </div>
 
+            {car.parked && <Owed car={car} now={now} />}
             {!car.parked ? (
               <>
                 <Step tone="done" title="Picked up" text="Thanks for valeting with us. Drive safe!" />
@@ -146,6 +152,20 @@ export default function GuestPage({ token }: { token: string }) {
       </main>
       <p className="guest-foot">Powered by Valetate</p>
     </div>
+  );
+}
+
+/** "Parking so far: $16 · pay at the stand" */
+function Owed({ car, now }: { car: GuestCar; now: number }) {
+  const rates = { ...NO_RATES, ...(car.rates ?? {}) };
+  if (rates.mode === 'off' || !car.parked_at) return null;
+  if (car.paid) return <p className="guest-owed paid">Parking paid ✓</p>;
+  const fee = feeFor(rates, now - Date.parse(car.parked_at));
+  if (!fee) return null;
+  return (
+    <p className="guest-owed">
+      Parking so far: <b>{dollars(fee)}</b> · pay at the stand
+    </p>
   );
 }
 

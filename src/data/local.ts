@@ -9,6 +9,7 @@ import { loadHistory, logHistory, type RequestVisit } from '../report';
 import { loadIncidents, recentIncidents, saveIncidents } from '../incidents';
 import { learnVehicle, loadVehicles, lookupKey, saveVehicle } from '../guests';
 import { plateKey } from '../plates';
+import { loadPayments, loadRates, loadValidations, savePayments, saveRates, saveValidations } from '../payments';
 import type { CarRequest } from '../types';
 
 const visitOf = (r: CarRequest, status: RequestVisit['status']): RequestVisit => ({
@@ -143,8 +144,25 @@ export const localSource: DataSource = {
       tips: loadTips().filter((t) => !t.voided && t.createdAt >= since),
       shifts: loadShifts().filter((s) => !s.endedAt || s.endedAt >= since),
       people: { local: 'You' },
+      payments: loadPayments().filter((p) => p.createdAt >= since),
     };
   },
+  getRates: async () => loadRates(),
+  setRates: async (r) => saveRates(r),
+  listValidations: async () => loadValidations(),
+  saveValidation: async (v) => {
+    const list = loadValidations();
+    if (!v.id || list.some((x) => x.id !== v.id && x.code === v.code)) throw new Error(`There's already a code ${v.code}`);
+    saveValidations(list.some((x) => x.id === v.id) ? list.map((x) => (x.id === v.id ? v : x)) : [...list, v]);
+  },
+  listPayments: async (since) => loadPayments().filter((p) => p.createdAt >= since),
+  takePayment: async (pay) => {
+    const list = loadPayments();
+    if (list.some((p) => p.id === pay.id)) return;
+    if (list.some((p) => p.carId === pay.carId && !p.voided)) throw new Error('This car is already paid');
+    savePayments([...list, pay]);
+  },
+  voidPayment: async (id) => savePayments(loadPayments().map((p) => (p.id === id ? { ...p, voided: true } : p))),
   getEvent: async () => loadEvent(),
   startEvent: async (e) => saveEvent(e),
   updateEvent: async (id, patch) => {
@@ -179,6 +197,7 @@ export const localSource: DataSource = {
       if (e.key?.startsWith('valetate.event')) on.event?.();
       if (e.key?.startsWith('valetate.shifts') || e.key?.startsWith('valetate.tips')) on.team?.();
       if (e.key?.startsWith('valetate.incidents')) on.incidents?.();
+      if (e.key?.startsWith('valetate.payments') || e.key?.startsWith('valetate.rates') || e.key?.startsWith('valetate.validations')) on.payments?.();
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);

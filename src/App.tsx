@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { lazy, Suspense, type ComponentProps, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ASSETS, type AssetDef } from './assets';
 import { Canvas, MAX_Z, MIN_Z, type View } from './components/Canvas';
 import { Inspector } from './components/Inspector';
@@ -19,10 +19,11 @@ import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
 import { liveRequests, newGuestToken } from './requests';
 import { createPhotoQueue } from './photoQueue';
-import type { CarRequest, Feedback, Incident, LotEvent, LotMap, MapItem, ParkedCar, Shift, Spot, Tip } from './types';
+import type { CarRequest, Feedback, Incident, LotEvent, LotMap, MapItem, ParkedCar, PlateHistory, Shift, Spot, Tip } from './types';
 import { almostFull, isPre, standPoint } from './surge';
 import { EventDialog, EventPill } from './components/EventMode';
-import { forgetPlate } from './components/GuestNote';
+import { forgetPlate, usePlateHistory } from './components/GuestNote';
+import { dollars, methodInfo, NO_RATES, paymentFor, ratesText, type Payment, type Rates, type Validation } from './payments';
 import { dayStart, duration, money, splitPool } from './shifts';
 import { Loading } from './components/Loading';
 import { kindInfo } from './incidents';
@@ -33,6 +34,8 @@ const PhotoSheet = lazy(() => import('./components/PhotoSheet').then((m) => ({ d
 const ShiftSheet = lazy(() => import('./components/ShiftSheet').then((m) => ({ default: m.ShiftSheet })));
 const Dashboard = lazy(() => import('./components/Dashboard').then((m) => ({ default: m.Dashboard })));
 const IncidentSheet = lazy(() => import('./components/IncidentSheet').then((m) => ({ default: m.IncidentSheet })));
+const PaymentSheet = lazy(() => import('./components/PaymentSheet').then((m) => ({ default: m.PaymentSheet })));
+const RatesSheet = lazy(() => import('./components/RatesSheet').then((m) => ({ default: m.RatesSheet })));
 
 function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean } {
   const id = currentMapId();
@@ -345,6 +348,26 @@ export default function App({ source, role, account, initialMaps, initialCars, c
     [role, flash],
   );
   const lookupPlate = useCallback((plate: string) => source.lookupPlate(plate), [source]);
+
+  // what the stand charges, validation codes, and who's paid
+  const [rates, setRates] = useState<Rates>(NO_RATES);
+  const [validations, setValidations] = useState<Validation[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [paySheet, setPaySheet] = useState<{ car: ParkedCar; end: number; checkout: boolean } | null>(null);
+  const [ratesOpen, setRatesOpen] = useState(false);
+  const refreshPayments = useCallback(async () => {
+    const [r, v, p] = await Promise.all([
+      source.getRates().catch(() => null),
+      source.listValidations().catch(() => null),
+      source.listPayments(Date.now() - 3 * 24 * 60 * 60 * 1000).catch(() => null),
+    ]);
+    if (r) setRates(r);
+    if (v) setValidations(v);
+    if (p) setPayments(p);
+  }, [source]);
+  useEffect(() => {
+    refreshPayments();
+  }, [refreshPayments]);
   const openIncidents = incidents.filter((i) => i.status === 'open').length;
   const refreshTeam = useCallback(async () => {
     const from = dayStart(Date.now());
@@ -462,6 +485,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
         team: refreshTeam,
         incidents: refreshIncidents,
         feedback: onFeedback,
+        payments: refreshPayments,
         live: setLive,
         maps: async () => {
           const ms = await source.listMaps().catch(() => null);
@@ -476,7 +500,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
           }
         },
       }),
-    [source, refreshCars, refreshRequests, refreshEvent, refreshTeam, refreshIncidents, onFeedback],
+    [source, refreshCars, refreshRequests, refreshEvent, refreshTeam, refreshIncidents, onFeedback, refreshPayments],
   );
 
   // a phone that slept or lost signal missed changes: catch up as soon as it's back
@@ -677,7 +701,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
     flash(out ? `Keys for ${carName(car)} are with you` : `Keys for ${carName(car)} back ${hook ? `on hook ${hook}` : 'on the board'}`);
   };
 
-  const retrieveCar = (car: ParkedCar) => {
+  const retrieveCar = (car: ParkedCar, paid = '') => {
     const putBack = () => setCars((cs) => [...cs.filter((c) => c.id !== car.id), car]);
     const takeOff = () => setCars((cs) => cs.filter((c) => c.id !== car.id));
     takeOff();
@@ -687,7 +711,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
     // this visit now counts toward the plate's history
     if (car.plate) done.then(() => forgetPlate(car.plate), () => {});
     // a mis-tap at rush shouldn't lose a car: offer undo for a few seconds
-    flash(`${carName(car)} retrieved from ${car.spotLabel}`, () => {
+    flash(`${carName(car)} ${paid ? `${paid} · ` : ''}retrieved from ${car.spotLabel}`, () => {
       putBack();
       run(
         done.catch(() => {}).then(() => source.unretrieveCar(car)),
@@ -695,6 +719,20 @@ export default function App({ source, role, account, initialMaps, initialCars, c
       );
       flash(`${carName(car)} is back in ${car.spotLabel}`);
     });
+  };
+
+  // with rates on, handing a car over goes through checkout first
+  const checkOut = (car: ParkedCar) => {
+    if (rates.mode === 'off' || paymentFor(payments, car)) return retrieveCar(car);
+    setPaySheet({ car, end: Date.now(), checkout: true });
+  };
+  const takePayment = (car: ParkedCar, pay: Payment, checkout: boolean) => {
+    setPaySheet(null);
+    setPayments((ps) => [...ps, { ...pay, takenBy: source.me.id, takenByName: source.me.name }]);
+    run(source.takePayment(pay), () => setPayments((ps) => ps.filter((x) => x.id !== pay.id))).then(refreshPayments);
+    const what = pay.method === 'comp' ? 'comped' : pay.amountCents ? `paid ${dollars(pay.amountCents)}` : methodInfo(pay.method).label.toLowerCase();
+    if (checkout) retrieveCar(car, what);
+    else flash(`${carName(car)} ${what}`);
   };
 
   const requestCar = (car: ParkedCar, dueAt?: number) => {
@@ -945,6 +983,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
               Incidents{openIncidents > 0 && <span className="menu-count">{openIncidents} open</span>}
             </button>
             {role !== 'valet' && <button onClick={() => setReportOpen(true)}>Stand report</button>}
+            {role !== 'valet' && <button onClick={() => setRatesOpen(true)}>Rates and validations</button>}
             {mode === 'live' && <button onClick={() => setEventDialog(true)}>{event ? 'Event: change let-out time' : 'Start event mode'}</button>}
             <button onClick={() => exportPng(map).catch((e) => flash(e.message))}>Save map as image (PNG)</button>
             <button onClick={() => exportSvg(map)}>Save map as vector (SVG)</button>
@@ -1118,7 +1157,24 @@ export default function App({ source, role, account, initialMaps, initialCars, c
               if (patch.ticket) setLastTag(patch.ticket);
               flash('Details saved');
             }}
-            onRetrieve={retrieveCar}
+            onRetrieve={checkOut}
+            pay={
+              rates.mode === 'off'
+                ? undefined
+                : {
+                    rates,
+                    payments,
+                    onTake: (car) => setPaySheet({ car, end: Date.now(), checkout: false }),
+                    onVoid:
+                      role === 'valet'
+                        ? undefined
+                        : (pay) => {
+                            setPayments((ps) => ps.map((x) => (x.id === pay.id ? { ...x, voided: true } : x)));
+                            run(source.voidPayment(pay.id)).then(refreshPayments);
+                            flash('Payment undone');
+                          },
+                  }
+            }
             onFind={find}
             onKeys={setKeys}
             onBlocks={setBlocks}
@@ -1178,7 +1234,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
               setRequests((rs) => rs.filter((x) => x.id !== r.id));
               run(source.cancelRequest(r.id)).then(refreshRequests);
             }}
-            onHandOver={retrieveCar}
+            onHandOver={checkOut}
             onStartMove={setMoving}
             onFocus={(s) => {
               setActiveSpotKey(s.key);
@@ -1236,6 +1292,50 @@ export default function App({ source, role, account, initialMaps, initialCars, c
               flash(reopen ? 'Reopened' : 'Marked resolved');
             }}
             onClose={() => setIncidentSheet(null)}
+          />
+        </Suspense>
+      )}
+      {paySheet && (
+        <Suspense fallback={<Loading />}>
+          <PaySheetFor
+            {...paySheet}
+            rates={rates}
+            validations={validations}
+            lookupPlate={lookupPlate}
+            onPay={(pay) => takePayment(paySheet.car, pay, paySheet.checkout)}
+            onSkip={() => {
+              setPaySheet(null);
+              retrieveCar(paySheet.car, 'not paid');
+            }}
+            onClose={() => setPaySheet(null)}
+          />
+        </Suspense>
+      )}
+      {ratesOpen && (
+        <Suspense fallback={<Loading />}>
+          <RatesSheet
+            rates={rates}
+            validations={validations}
+            canSetRates={role === 'admin'}
+            onRates={(r) => {
+              setRates(r);
+              run(source.setRates(r)).then(refreshPayments);
+              flash(r.mode === 'off' ? 'Rates off: no checkout' : `Rates saved: ${ratesText(r)}`);
+            }}
+            onValidation={(v) => {
+              setValidations((list) => (list.some((x) => x.id === v.id) ? list.map((x) => (x.id === v.id ? v : x)) : [...list, v]));
+              source.saveValidation(v).then(
+                () => {
+                  refreshPayments();
+                  flash(v.active ? `Code ${v.code} is live` : `Code ${v.code} retired`);
+                },
+                (e) => {
+                  refreshPayments();
+                  flash(friendlyError(e));
+                },
+              );
+            }}
+            onClose={() => setRatesOpen(false)}
           />
         </Suspense>
       )}
@@ -1310,4 +1410,13 @@ export default function App({ source, role, account, initialMaps, initialCars, c
       )}
     </div>
   );
+}
+
+/** the payment sheet, with the plate's profile looked up (a monthly pass, a hotel room) */
+function PaySheetFor({
+  lookupPlate,
+  ...p
+}: Omit<ComponentProps<typeof PaymentSheet>, 'history'> & { lookupPlate: (plate: string) => Promise<PlateHistory | null> }) {
+  const history = usePlateHistory(lookupPlate, p.car.plate);
+  return <PaymentSheet {...p} history={history} />;
 }

@@ -1,3 +1,4 @@
+import type { Payment, Rates, Validation } from '../payments';
 import type { CarPhoto, CarRequest, Feedback, Incident, LotEvent, PlateHistory, VehicleProfile, LotMap, ParkedCar, PhotoSide, Shift, Tip } from '../types';
 import type { Outbox } from './outbox';
 import type { ReportData } from '../report';
@@ -91,6 +92,18 @@ export interface DataSource {
   lookupPlate(plate: string): Promise<PlateHistory | null>;
   /** save a guest profile: monthly, hotel room, preferences… */
   saveVehicle(profile: VehicleProfile): Promise<void>;
+  /** what the stand charges; admins set it */
+  getRates(): Promise<Rates>;
+  setRates(rates: Rates): Promise<void>;
+  /** validation codes, retired ones included */
+  listValidations(): Promise<Validation[]>;
+  /** add or change one (managers and admins) */
+  saveValidation(v: Validation): Promise<void>;
+  /** payments since `since`, voided ones included */
+  listPayments(since: number): Promise<Payment[]>;
+  takePayment(payment: Payment): Promise<void>;
+  /** managers: undo a payment taken by mistake */
+  voidPayment(id: string): Promise<void>;
   /** cars, requests, tips and shifts since `since`, for the manager dashboard */
   reportData(since: number): Promise<ReportData>;
   /** put a car marked retrieved by mistake back on its spot */
@@ -109,6 +122,8 @@ export interface DataSource {
     incidents?: () => void;
     /** a guest just rated a visit (managers and admins only) */
     feedback?: (f: Feedback) => void;
+    /** payments, validation codes or rates changed */
+    payments?: () => void;
     live?: (live: boolean) => void;
   }): () => void;
 }

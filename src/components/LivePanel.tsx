@@ -10,6 +10,7 @@ import { matchPlate } from '../plates';
 import { blockedBy, blockersOf, carsNear } from '../stacks';
 import { RequestQueue, RequestStatus, type RequestActions } from './RequestQueue';
 import { SheetHandle } from './SheetHandle';
+import { coveredByMonthly, dollars, feeFor, methodInfo, paymentFor, type Payment, type Rates } from '../payments';
 
 // opened now and then: loaded the first time they're needed
 const PlateScanner = lazy(() => import('./PlateScanner').then((m) => ({ default: m.PlateScanner })));
@@ -41,6 +42,14 @@ interface Props extends RequestActions {
   /** what the stand knows about a plate, and saving a guest profile */
   lookupPlate: (plate: string) => Promise<PlateHistory | null>;
   onSaveProfile: (profile: VehicleProfile) => void;
+  /** with rates on: what each car owes and who's paid */
+  pay?: {
+    rates: Rates;
+    payments: Payment[];
+    onTake: (car: ParkedCar) => void;
+    /** managers only */
+    onVoid?: (payment: Payment) => void;
+  };
   spots: Spot[];
   /** cars on this map */
   cars: ParkedCar[];
@@ -341,6 +350,7 @@ export function LivePanel(p: Props) {
             </span>
             <button onClick={() => p.onKeys(car, !car.keysWith)}>{car.keysWith ? `Back on ${keyHook(car) ? `hook ${keyHook(car)}` : 'board'}` : 'Take keys'}</button>
           </div>
+          {p.pay && <PayRow pay={p.pay} car={car} now={p.now} monthly={coveredByMonthly(carKnown?.profile, p.now)} />}
           {inTheWay.length > 0 && (
             <div className="blocked-warn">
               <b>Blocked in.</b> Move first:
@@ -651,3 +661,35 @@ export function LivePanel(p: Props) {
     </aside>
   );
 }
+
+/** what the car owes so far, or how it was paid */
+function PayRow({ pay, car, now, monthly }: { pay: NonNullable<Props['pay']>; car: ParkedCar; now: number; monthly: boolean }) {
+  const paid = paymentFor(pay.payments, car);
+  if (paid) {
+    const m = methodInfo(paid.method);
+    return (
+      <div className="pay-row paid">
+        <span aria-hidden>✓</span>
+        <span className="pay-what">
+          {paid.method === 'comp' ? 'Comped' : paid.method === 'monthly' ? 'Monthly' : `Paid ${dollars(paid.amountCents)}`}
+          <small>
+            {' '}
+            · {m.label}
+            {paid.code && ` ${paid.code}`}
+            {paid.takenByName && ` · ${paid.takenByName.split(' ')[0]}`}
+          </small>
+        </span>
+        {pay.onVoid && <button onClick={() => pay.onVoid!(paid)}>Undo</button>}
+      </div>
+    );
+  }
+  const fee = feeFor(pay.rates, now - car.parkedAt) ?? 0;
+  return (
+    <div className="pay-row">
+      <span aria-hidden>{monthly ? '📅' : '💳'}</span>
+      <span className="pay-what">{monthly ? 'Monthly pass · no charge' : fee ? `${dollars(fee)} so far` : 'No charge yet'}</span>
+      <button onClick={() => pay.onTake(car)}>{monthly ? 'Check pass' : 'Take payment'}</button>
+    </div>
+  );
+}
+

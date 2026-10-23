@@ -3366,3 +3366,293 @@ button.fill-btn {
   color: var(--muted);
   font-size: 12px;
 }
+
+/* ---------- payments and validations ---------- */
+.pay-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+.pay-row.paid {
+  border-color: #30a46c88;
+  background: #30a46c1a;
+}
+.pay-row.paid > span:first-child {
+  color: #3dd68c;
+  font-weight: 700;
+}
+.pay-row .pay-what {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pay-row .pay-what small {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 13px;
+}
+.pay-row button {
+  flex: none;
+  font-weight: 600;
+}
+.pay-sheet {
+  max-width: 440px;
+}
+.pay-car {
+  margin: 2px 0 0;
+  color: var(--muted);
+}
+.pay-due {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 12px 0 14px;
+}
+.pay-due b {
+  font-size: 44px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.pay-due b.reduced {
+  color: #3dd68c;
+}
+.pay-due s {
+  color: var(--muted);
+  font-size: 20px;
+}
+.pay-due small {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 13px;
+}
+.pay-methods {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.pay-methods button {
+  margin: 0;
+  min-height: 56px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+  padding: 6px 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.pay-methods button span {
+  font-size: 20px;
+  line-height: 1;
+}
+.pay-methods button.on {
+  border-color: var(--accent);
+  background: #4da3ff22;
+  color: var(--text);
+}
+.pay-sheet .hint,
+.pay-sheet .warn,
+.pay-free {
+  margin: 12px 0 0;
+}
+.pay-free {
+  color: #3dd68c;
+}
+.pay-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.pay-field > span:first-child {
+  color: var(--muted);
+}
+.pay-field input {
+  font-size: 18px;
+}
+.pay-change {
+  color: var(--muted);
+}
+.pay-change b {
+  color: var(--text);
+  font-size: 18px;
+}
+.pay-code.ok {
+  color: #3dd68c;
+  font-weight: 600;
+}
+.pay-code.bad {
+  color: #ff8a8d;
+}
+.pay-actions {
+  display: grid;
+  gap: 4px;
+  margin-top: 16px;
+}
+.pay-actions .primary.big {
+  width: 100%;
+  margin: 0;
+}
+.pay-skip {
+  justify-self: center;
+  color: var(--muted);
+}
+
+.rates-sheet {
+  max-width: 520px;
+}
+.rates-sheet section + section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.rates-sheet h3 {
+  margin: 0 0 10px;
+}
+.rates-form {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.rates-form:disabled {
+  opacity: 0.7;
+}
+.rates-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.rates-row label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.rates-row label > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.money-input,
+.suffix-input {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.money-input:focus-within,
+.suffix-input:focus-within {
+  border-color: var(--accent);
+}
+.money-input i,
+.suffix-input i {
+  font-style: normal;
+  color: var(--muted);
+  padding: 0 10px;
+}
+.money-input i {
+  padding-right: 0;
+}
+.money-input input,
+.suffix-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  margin: 0;
+  outline: none;
+  font-variant-numeric: tabular-nums;
+}
+.rates-save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rates-save .hint {
+  flex: 1;
+  margin: 0;
+}
+.rates-save button {
+  margin: 0;
+}
+.new-code {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+.codes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.codes li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.codes li > span {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+}
+.codes li button {
+  margin: 0;
+}
+.codes li.retired {
+  opacity: 0.55;
+}
+.codes .code {
+  font-family: ui-monospace, Menlo, monospace;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #ffc53d22;
+  color: #ffc53d;
+}
+
+.pay-sum {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.pay-dist li {
+  grid-template-columns: 90px 1fr auto;
+}
+.pay-dist li > i > i {
+  background: var(--accent);
+}
+.guest-owed {
+  color: var(--muted);
+}
+.guest-owed b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.guest-owed.paid {
+  color: #3dd68c;
+  font-weight: 600;
+}
+.rates-sheet .seg {
+  display: flex;
+}
+.rates-sheet .seg button {
+  flex: 1;
+}

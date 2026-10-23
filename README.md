@@ -76,6 +76,14 @@ Every car checked in teaches the app its plate. The next time that plate is type
 
 Once a car is handed back, the guest's car link asks one question: "How was your valet service?" One tap on a star saves it; a short comment is optional (a low rating asks what went wrong). The guest can change their answer while the link still works, 3 hours after pickup. The rating is tied to the valet who brought the car up. A rating of 1 or 2 stars pops up for managers and admins right away, while the guest may still be at the curb. The stand report shows the average, how the stars spread, every comment and low rating, and each valet's average in the crew table and CSV. Only managers and admins can read feedback. Stored in `feedback`, written only through the `guest_feedback` function.
 
+### Payments and validations
+
+An admin sets what the stand charges under "Rates and validations" in the menu: no charge, a flat fee (charged again for each extra day), or hourly with a daily max, plus an optional free grace period. Managers add validation codes there for restaurants, spas or theaters: parks free, dollars off, or hours free. Retired codes stop working.
+
+With rates on, each car's card shows what it owes so far. "Car retrieved" and "Handed over" open checkout first: card, cash (with change worked out), room charge, a validation code, a comp (with a reason), or a monthly pass (picked automatically for a current monthly). A car can also be paid at drop-off, and then checkout is skipped. Managers can undo a payment. The guest's link shows what's owed so far, or that it's paid. The stand report adds what was collected by method, room charges, and what was given away in validations and comps.
+
+Card payments are run on the stand's own card reader or phone tap to pay and recorded here. The app never handles card numbers. Charging cards inside the app (Stripe Terminal or Tap to Pay) needs a Stripe account, like Twilio does for texts. Stored in `companies.rates`, `validations` and `payments`. A payment can only be voided, never edited.
+
 ### Stand report (managers and admins)
 
 "Stand report" in the menu shows today, the last 7 days or the last 30 days. It covers cars in and out, the average wait (from the request, or the let-out for cars asked for ahead, until the car is at the stand) with the time 9 in 10 guests got their car within, and the busiest hour with a by-hour chart of requests or arrivals. It also shows cars per day, and a crew table with cars parked, cars brought up, average wait, time on the clock and tip share for each person, which you can download as a CSV. It is built from the `parked_cars`, `requests`, `tips` and `shifts` rows (valets can't read past cars, so it's managers only). Single-device mode keeps a local history of finished cars for it.
