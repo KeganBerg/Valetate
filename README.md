@@ -40,6 +40,10 @@ In the Supabase dashboard, open Authentication → URL Configuration and set **S
 
 "Photos" on a parked car opens a guided walkaround: front, driver side, back, passenger side, plus any close-ups. Each picture is shrunk on the phone (about 1600 px, a few hundred KB) with the time, tag and side burned into the corner, then uploads in the background and retries when signal comes back. Any photo can be marked as showing damage. Team accounts keep photos in the private `car-photos` Supabase Storage bucket under `<company>/<car>/`; only company members can see them and only admins can delete them. Single-device mode keeps them in the browser's IndexedDB.
 
+### Plate scan
+
+"📷 Scan plate" at check-in (and the camera button by the plate field or the parked-car search) opens the rear camera with a plate-shaped box. Frames inside the box are read on the phone with [Tesseract.js](https://github.com/naptha/tesseract.js) until two reads agree, then the plate is shown big and editable before it's used. Nothing leaves the phone. Scanning to search jumps to that car on any map, allowing for lookalike misreads (O/0, B/8, S/5) and one wrong character. Check-in warns when the plate is already parked. The reader's files (about 7 MB: worker, WebAssembly core, English model) are copied from `node_modules` into `public/ocr` by `scripts/copy-ocr.mjs` before `dev` and `build`, so the app serves them itself and needs no CDN; they only download the first time someone scans. Without camera access it falls back to taking a photo, or typing.
+
 ### Adding automatic texts later (Twilio)
 
 The data is ready for it: requests record a `source` (`staff`, `guest`, `sms`), cars keep `owner_phone` and `guest_token`. The plan is a Supabase Edge Function that sends the welcome text (with the guest link) when a car is parked with a phone number, the "your car is ready" text when a request turns `ready`, and accepts "reply 1 to request" through a Twilio webhook. Setup needed: a Twilio account, a phone number (US: toll-free verification or A2P 10DLC registration, which can take days), and `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` saved as Edge Function secrets.
