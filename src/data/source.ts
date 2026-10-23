@@ -1,4 +1,4 @@
-import type { CarPhoto, CarRequest, LotEvent, LotMap, ParkedCar, PhotoSide, Shift, Tip } from '../types';
+import type { CarPhoto, CarRequest, Incident, LotEvent, LotMap, ParkedCar, PhotoSide, Shift, Tip } from '../types';
 import type { Outbox } from './outbox';
 import type { ReportData } from '../report';
 
@@ -79,6 +79,14 @@ export interface DataSource {
   /** the guests' digital tip link (Venmo, Cash App…); admins set it */
   getTipUrl(): Promise<string>;
   setTipUrl(url: string): Promise<void>;
+  /** incident reports: all open ones and those resolved in the last 30 days */
+  listIncidents(): Promise<Incident[]>;
+  /** file a report; `photos` are already-shrunk JPEGs whose ids are chosen by the caller */
+  reportIncident(incident: Incident, photos: { id: string; blob: Blob }[]): Promise<void>;
+  /** managers: close it with what was done, or reopen it */
+  resolveIncident(id: string, resolution: string, reopen?: boolean): Promise<void>;
+  /** something the browser can show for each of a report's photos */
+  incidentPhotos(incident: Incident): Promise<string[]>;
   /** cars, requests, tips and shifts since `since`, for the manager dashboard */
   reportData(since: number): Promise<ReportData>;
   /** put a car marked retrieved by mistake back on its spot */
@@ -94,6 +102,7 @@ export interface DataSource {
     event?: () => void;
     /** shifts or tips changed */
     team?: () => void;
+    incidents?: () => void;
     live?: (live: boolean) => void;
   }): () => void;
 }

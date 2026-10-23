@@ -34,6 +34,8 @@ interface Props extends RequestActions {
   onGuestLink?: (car: ParkedCar) => void;
   /** walkaround damage photos */
   onPhotos: (car: ParkedCar) => void;
+  /** file an incident report about this car */
+  onIncident: (car: ParkedCar) => void;
   spots: Spot[];
   /** cars on this map */
   cars: ParkedCar[];
@@ -403,6 +405,7 @@ export function LivePanel(p: Props) {
             <button onClick={() => setEditing({ ...EMPTY, ...car })}>
               {car.plate && car.color && car.ownerName ? 'Edit details' : 'Add details'}
             </button>
+            <button onClick={() => p.onIncident(car)}>Report incident</button>
           </div>
           {pickBlocks && (
             <div className="blocks-edit">
