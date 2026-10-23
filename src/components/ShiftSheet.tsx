@@ -20,6 +20,7 @@ interface Props {
   /** for the handoff summary */
   cars: ParkedCar[];
   requests: CarRequest[];
+  openIncidents: number;
   onClockIn: (s: Shift) => void;
   onClockOut: (s: Shift, note: string) => void;
   onTip: (t: Tip) => void;
@@ -96,6 +97,9 @@ export function ShiftSheet(props: Props) {
               </li>
               <li className={waiting ? 'warn-text' : ''}>
                 <b>{waiting}</b> {waiting === 1 ? 'request' : 'requests'} still open
+              </li>
+              <li className={p.openIncidents ? 'warn-text' : ''}>
+                <b>{p.openIncidents}</b> {p.openIncidents === 1 ? 'incident' : 'incidents'} still open
               </li>
               {closing.userId === p.me.id && (
                 <li>

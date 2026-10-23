@@ -19,17 +19,19 @@ import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
 import { liveRequests, newGuestToken } from './requests';
 import { createPhotoQueue } from './photoQueue';
-import type { CarRequest, LotEvent, LotMap, MapItem, ParkedCar, Shift, Spot, Tip } from './types';
+import type { CarRequest, Incident, LotEvent, LotMap, MapItem, ParkedCar, Shift, Spot, Tip } from './types';
 import { almostFull, isPre, standPoint } from './surge';
 import { EventDialog, EventPill } from './components/EventMode';
 import { dayStart, duration, money, splitPool } from './shifts';
 import { Loading } from './components/Loading';
+import { kindInfo } from './incidents';
 
 // opened now and then: loaded the first time they're needed
 const GuestLinkDialog = lazy(() => import('./components/GuestLink').then((m) => ({ default: m.GuestLinkDialog })));
 const PhotoSheet = lazy(() => import('./components/PhotoSheet').then((m) => ({ default: m.PhotoSheet })));
 const ShiftSheet = lazy(() => import('./components/ShiftSheet').then((m) => ({ default: m.ShiftSheet })));
 const Dashboard = lazy(() => import('./components/Dashboard').then((m) => ({ default: m.Dashboard })));
+const IncidentSheet = lazy(() => import('./components/IncidentSheet').then((m) => ({ default: m.IncidentSheet })));
 
 function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean } {
   const id = currentMapId();
@@ -311,6 +313,28 @@ export default function App({ source, role, account, initialMaps, initialCars, c
   const [tipUrl, setTipUrl] = useState('');
   const [shiftOpen, setShiftOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+
+  // incident reports; managers get a heads-up when someone files one
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [incidentSheet, setIncidentSheet] = useState<{ car: ParkedCar | null } | null>(null);
+  const seenIncidents = useRef<Set<string> | null>(null);
+  const refreshIncidents = useCallback(async () => {
+    const list = await source.listIncidents().catch(() => null);
+    if (!list) return;
+    const seen = seenIncidents.current;
+    const fresh = seen ? list.filter((i) => !seen.has(i.id) && i.status === 'open' && i.reportedBy !== source.me.id) : [];
+    seenIncidents.current = new Set(list.map((i) => i.id));
+    setIncidents(list);
+    if (fresh.length && role !== 'valet') {
+      const i = fresh[0];
+      flash(`${kindInfo(i.kind).icon} ${kindInfo(i.kind).label}${i.carLabel ? ` · ${i.carLabel.split(' · ')[0]}` : ''} reported by ${i.reportedByName || 'a valet'}`, () => setIncidentSheet({ car: null }), 'View');
+      navigator.vibrate?.([200, 80, 200, 80, 200]);
+    }
+  }, [source, role, flash]);
+  useEffect(() => {
+    refreshIncidents();
+  }, [refreshIncidents]);
+  const openIncidents = incidents.filter((i) => i.status === 'open').length;
   const refreshTeam = useCallback(async () => {
     const from = dayStart(Date.now());
     const [s, t, u] = await Promise.all([
@@ -425,6 +449,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
         requests: refreshRequests,
         event: refreshEvent,
         team: refreshTeam,
+        incidents: refreshIncidents,
         live: setLive,
         maps: async () => {
           const ms = await source.listMaps().catch(() => null);
@@ -439,7 +464,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
           }
         },
       }),
-    [source, refreshCars, refreshRequests, refreshEvent, refreshTeam],
+    [source, refreshCars, refreshRequests, refreshEvent, refreshTeam, refreshIncidents],
   );
 
   // a phone that slept or lost signal missed changes: catch up as soon as it's back
@@ -886,6 +911,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
         <details className="menu">
           <summary aria-label="Menu">
             {account ? <span className="avatar">{initials(account.name || account.email)}</span> : <span className="dots">•••</span>}
+            {openIncidents > 0 && role !== 'valet' && <span className="menu-dot" aria-label={`${openIncidents} open incidents`} />}
           </summary>
           <div className="menu-list" onClick={(e) => (e.currentTarget.parentElement as HTMLDetailsElement).removeAttribute('open')}>
             {account && (
@@ -901,6 +927,9 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             {account?.onSwitchCompany && <button onClick={account.onSwitchCompany}>Switch company</button>}
             {account && <hr />}
             {mode === 'live' && <button onClick={() => setShiftOpen(true)}>Shift and tips</button>}
+            <button onClick={() => setIncidentSheet({ car: null })}>
+              Incidents{openIncidents > 0 && <span className="menu-count">{openIncidents} open</span>}
+            </button>
             {role !== 'valet' && <button onClick={() => setReportOpen(true)}>Stand report</button>}
             {mode === 'live' && <button onClick={() => setEventDialog(true)}>{event ? 'Event: change let-out time' : 'Start event mode'}</button>}
             <button onClick={() => exportPng(map).catch((e) => flash(e.message))}>Save map as image (PNG)</button>
@@ -1100,6 +1129,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             }}
             onGuestLink={source.kind === 'cloud' ? setGuestLinkCar : undefined}
             onPhotos={setPhotoCar}
+            onIncident={(car) => setIncidentSheet({ car })}
             onClaim={(r) => {
               patchRequest(r.id, { status: 'claimed', claimedBy: source.me.id, claimedByName: source.me.name, claimedAt: Date.now() });
               // whoever goes for the car takes its keys off the board
@@ -1155,6 +1185,36 @@ export default function App({ source, role, account, initialMaps, initialCars, c
           }}
         />
       )}
+      {incidentSheet && (
+        <Suspense fallback={<Loading />}>
+          <IncidentSheet
+            source={source}
+            me={source.me}
+            isManager={role !== 'valet'}
+            incidents={incidents}
+            cars={cars}
+            forCar={incidentSheet.car}
+            onChanged={() => {
+              refreshIncidents();
+              flash('Report filed');
+            }}
+            onResolve={(inc, note, reopen) => {
+              setIncidents((list) =>
+                list.map((i) =>
+                  i.id === inc.id
+                    ? reopen
+                      ? { ...i, status: 'open', resolvedAt: null }
+                      : { ...i, status: 'resolved', resolvedAt: Date.now(), resolvedByName: source.me.name, resolution: note }
+                    : i,
+                ),
+              );
+              run(source.resolveIncident(inc.id, note, reopen)).then(refreshIncidents);
+              flash(reopen ? 'Reopened' : 'Marked resolved');
+            }}
+            onClose={() => setIncidentSheet(null)}
+          />
+        </Suspense>
+      )}
       {reportOpen && (
         <Suspense fallback={<Loading />}>
           <Dashboard source={source} onClose={() => setReportOpen(false)} />
@@ -1172,6 +1232,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             tipUrl={tipUrl}
             cars={cars}
             requests={requests}
+            openIncidents={openIncidents}
             onClose={() => setShiftOpen(false)}
             onClockIn={(s) => {
               setShifts((ss) => [...ss, s]);

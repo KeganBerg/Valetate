@@ -2701,7 +2701,7 @@ table.crew tbody tr:last-child td {
 
 /* ---------- touch screens: every tap target at least 44px ---------- */
 @media (pointer: coarse) {
-  button:not(.sheet-handle):not(.swatch):not(.color-chip),
+  button:not(.sheet-handle):not(.swatch):not(.color-chip):not(.thumb-x),
   select,
   input:not([type='color']):not([type='checkbox']):not([type='radio']):not([type='range']) {
     min-height: 44px;
@@ -2832,4 +2832,282 @@ button:active:not(:disabled) {
   .app.mode-live .zoom-fit {
     min-width: 60px;
   }
+}
+
+/* ---------- incidents ---------- */
+.menu summary {
+  position: relative;
+}
+.menu-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff5a5f;
+  border: 2px solid var(--panel);
+}
+.menu-count {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ff8a8d;
+}
+.incident-sheet {
+  max-width: 520px;
+}
+.incident-sheet header h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.new-incident {
+  width: 100%;
+  margin: 14px 0 10px;
+}
+.incident-tabs {
+  display: flex;
+  margin-bottom: 8px;
+}
+.incident-tabs button {
+  flex: 1;
+  margin: 0;
+  min-height: 38px;
+}
+.incident-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.incident-row {
+  width: 100%;
+  margin: 0;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 4px solid #ffb547;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-weight: 400;
+}
+.incident-row.kind-accident,
+.incident-row.kind-damage {
+  border-left-color: #ff5a5f;
+}
+.incident-row.kind-lost_found {
+  border-left-color: #4da3ff;
+}
+.incident-row.kind-other {
+  border-left-color: var(--muted);
+}
+.incident-icon {
+  font-size: 22px;
+  line-height: 1.2;
+}
+.incident-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.incident-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.incident-main small {
+  color: var(--muted);
+}
+.incident-empty {
+  text-align: center;
+  padding: 24px 8px;
+}
+.incident-form {
+  margin-top: 12px;
+}
+.kind-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+}
+.kind-grid button {
+  margin: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  text-align: left;
+}
+.kind-grid button span {
+  font-size: 20px;
+}
+.kind-grid button.on {
+  border-color: var(--accent);
+  background: #4da3ff22;
+  color: var(--text);
+}
+.incident-car {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.incident-car b {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.incident-car button.link {
+  margin: 0;
+}
+.car-search ul {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.car-search li + li {
+  border-top: 1px solid var(--line);
+}
+.car-search li button {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  min-height: 44px;
+  font-weight: 500;
+}
+.incident-form textarea,
+.resolve-form textarea {
+  font-size: 16px;
+  resize: vertical;
+}
+.incident-photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  margin-top: 4px;
+}
+.incident-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel-2);
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.incident-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.incident-thumb.loading {
+  animation: pulse 1.2s ease-in-out infinite alternate;
+}
+@keyframes pulse {
+  to {
+    opacity: 0.5;
+  }
+}
+.incident-thumb button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  margin: 0;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: #000b;
+  border: 0;
+  color: #fff;
+}
+button.add-photo {
+  aspect-ratio: 1;
+  margin: 0;
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  border-style: dashed;
+}
+button.add-photo span {
+  font-size: 22px;
+}
+.incident-form .actions button.big {
+  width: 100%;
+}
+.incident-detail {
+  margin-top: 10px;
+}
+.incident-detail p {
+  margin: 8px 0;
+}
+.incident-status {
+  font-size: 13px;
+  color: var(--muted);
+}
+.incident-status.open::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffb547;
+  margin-right: 6px;
+}
+.incident-details {
+  white-space: pre-wrap;
+  font-size: 16px;
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.resolution {
+  margin-top: 12px;
+  border-left: 4px solid #34c759;
+  background: #34c7591a;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.resolution p {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+}
+.resolve-form {
+  margin-top: 14px;
+}
+button.photo-full {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #000e;
+  display: grid;
+  place-items: center;
+}
+button.photo-full img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
 }

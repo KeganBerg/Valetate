@@ -175,3 +175,26 @@ export interface CarPhoto {
   takenAt: number;
   takenByName: string;
 }
+
+export type IncidentKind = 'damage' | 'accident' | 'complaint' | 'lost_found' | 'other';
+
+/** A damage claim, accident, complaint or found item: one record for insurance and HR. */
+export interface Incident {
+  id: string;
+  kind: IncidentKind;
+  status: 'open' | 'resolved';
+  carId: string | null;
+  /** what the car was at the time, e.g. "#14 · Black BMW · A3" */
+  carLabel: string;
+  details: string;
+  guestName: string;
+  guestPhone: string;
+  /** storage paths (cloud) or local photo ids */
+  photos: string[];
+  reportedBy: string;
+  reportedByName: string;
+  createdAt: number;
+  resolvedAt: number | null;
+  resolvedByName: string;
+  resolution: string;
+}

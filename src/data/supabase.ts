@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { CarPhoto, CarRequest, LotMap, MapItem, ParkedCar, PhotoSide } from '../types';
+import type { CarPhoto, CarRequest, Incident, LotMap, MapItem, ParkedCar, PhotoSide } from '../types';
 import { MapConflict, type CarDetails, type DataSource, type Role } from './source';
 import type { RequestVisit } from '../report';
 
@@ -166,6 +166,41 @@ interface PhotoRow {
 }
 
 const BUCKET = 'car-photos';
+
+interface IncidentRow {
+  id: string;
+  kind: Incident['kind'];
+  status: Incident['status'];
+  car_id: string | null;
+  car_label: string;
+  details: string;
+  guest_name: string;
+  guest_phone: string;
+  photos: string[];
+  reported_by: string | null;
+  reported_by_name: string;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by_name: string;
+  resolution: string;
+}
+const toIncident = (r: IncidentRow): Incident => ({
+  id: r.id,
+  kind: r.kind,
+  status: r.status,
+  carId: r.car_id,
+  carLabel: r.car_label,
+  details: r.details,
+  guestName: r.guest_name,
+  guestPhone: r.guest_phone,
+  photos: r.photos ?? [],
+  reportedBy: r.reported_by ?? '',
+  reportedByName: r.reported_by_name,
+  createdAt: Date.parse(r.created_at),
+  resolvedAt: r.resolved_at ? Date.parse(r.resolved_at) : null,
+  resolvedByName: r.resolved_by_name,
+  resolution: r.resolution,
+});
 
 const toPhoto = (r: PhotoRow, url: string): CarPhoto => ({
   id: r.id,
@@ -533,6 +568,61 @@ export function cloudSource(companyId: string, userId: string, userName: string)
     async setTipUrl(url) {
       check(await db().from('companies').update({ tip_url: url }).eq('id', companyId));
     },
+    async listIncidents() {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const rows = check(
+        await db()
+          .from('incidents')
+          .select('*')
+          .eq('company_id', companyId)
+          .or(`status.eq.open,created_at.gte.${since},resolved_at.gte.${since}`)
+          .order('created_at', { ascending: false })
+          .limit(500),
+      ) as IncidentRow[];
+      return rows.map(toIncident);
+    },
+    async reportIncident(inc, photos) {
+      const paths: string[] = [];
+      for (const ph of photos) {
+        const path = `${companyId}/incidents/${inc.id}/${ph.id}.jpg`;
+        const up = await db().storage.from(BUCKET).upload(path, ph.blob, { contentType: 'image/jpeg', upsert: false });
+        if (up.error && !/exists|duplicate/i.test(up.error.message)) throw new Error(up.error.message);
+        paths.push(path);
+      }
+      const ins = await db().from('incidents').insert({
+        id: inc.id,
+        company_id: companyId,
+        kind: inc.kind,
+        car_id: inc.carId,
+        car_label: inc.carLabel,
+        details: inc.details,
+        guest_name: inc.guestName,
+        guest_phone: inc.guestPhone,
+        photos: paths,
+        reported_by: userId,
+        reported_by_name: userName,
+        created_at: new Date(inc.createdAt).toISOString(),
+      });
+      // a retry after a dropped response finds it already filed
+      if (ins.error && ins.error.code !== '23505') throw new Error(ins.error.message);
+    },
+    async resolveIncident(id, resolution, reopen) {
+      check(
+        await db()
+          .from('incidents')
+          .update(
+            reopen
+              ? { status: 'open', resolved_at: null, resolved_by: null, resolved_by_name: '', resolution }
+              : { status: 'resolved', resolved_at: new Date().toISOString(), resolved_by: userId, resolved_by_name: userName, resolution },
+          )
+          .eq('id', id),
+      );
+    },
+    async incidentPhotos(inc) {
+      if (!inc.photos.length) return [];
+      const signed = check(await db().storage.from(BUCKET).createSignedUrls(inc.photos, 3600)) as { signedUrl: string }[];
+      return signed.map((s) => s.signedUrl).filter(Boolean);
+    },
     async reportData(since) {
       const iso = new Date(since).toISOString();
       // a busy month is more rows than one request returns, so page through
@@ -650,6 +740,7 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'lot_events', filter: `company_id=eq.${companyId}` }, () => on.event?.())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts', filter: `company_id=eq.${companyId}` }, () => on.team?.())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tips', filter: `company_id=eq.${companyId}` }, () => on.team?.())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents', filter: `company_id=eq.${companyId}` }, () => on.incidents?.())
         .subscribe((status) => {
           // changes made while disconnected are not replayed, so reload after every (re)join
           if (status === 'SUBSCRIBED') {
@@ -659,6 +750,7 @@ export function cloudSource(companyId: string, userId: string, userName: string)
             on.requests?.();
             on.event?.();
             on.team?.();
+            on.incidents?.();
           } else on.live?.(false);
         });
       return () => {

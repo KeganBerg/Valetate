@@ -6,6 +6,7 @@ import { localPhotos } from './photoStore';
 import { deleteMap, loadMaps, saveMap } from '../storage';
 import type { DataSource } from './source';
 import { loadHistory, logHistory, type RequestVisit } from '../report';
+import { loadIncidents, recentIncidents, saveIncidents } from '../incidents';
 import type { CarRequest } from '../types';
 
 const visitOf = (r: CarRequest, status: RequestVisit['status']): RequestVisit => ({
@@ -85,6 +86,23 @@ export const localSource: DataSource = {
     if (r) logHistory({ requests: [visitOf(r, 'cancelled')] });
     saveRequests(loadRequests().filter((x) => x.id !== id));
   },
+  listIncidents: async () => recentIncidents(loadIncidents(), Date.now()),
+  reportIncident: async (inc, photos) => {
+    for (const ph of photos)
+      await localPhotos.put({ id: ph.id, carId: `incident:${inc.id}`, side: 'closeup', blob: ph.blob, takenAt: inc.createdAt, damage: false, note: '', takenByName: 'You' });
+    saveIncidents([...loadIncidents(), { ...inc, photos: photos.map((p) => p.id) }]);
+  },
+  resolveIncident: async (id, resolution, reopen) =>
+    saveIncidents(
+      loadIncidents().map((i) =>
+        i.id === id
+          ? reopen
+            ? { ...i, status: 'open', resolvedAt: null, resolvedByName: '', resolution }
+            : { ...i, status: 'resolved', resolvedAt: Date.now(), resolvedByName: 'You', resolution }
+          : i,
+      ),
+    ),
+  incidentPhotos: async (inc) => (await localPhotos.list(`incident:${inc.id}`)).map((p) => p.url),
   reportData: async (since) => {
     const h = loadHistory();
     return {
@@ -133,6 +151,7 @@ export const localSource: DataSource = {
       if (e.key?.startsWith('valetate.requests')) on.requests?.();
       if (e.key?.startsWith('valetate.event')) on.event?.();
       if (e.key?.startsWith('valetate.shifts') || e.key?.startsWith('valetate.tips')) on.team?.();
+      if (e.key?.startsWith('valetate.incidents')) on.incidents?.();
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
