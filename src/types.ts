@@ -131,6 +131,28 @@ export interface CarRequest {
   dueAt?: number | null;
 }
 
+/** Someone's time on the clock, and what they left for the next crew. */
+export interface Shift {
+  id: string;
+  userId: string;
+  userName: string;
+  startedAt: number;
+  endedAt: number | null;
+  handoffNote: string;
+}
+
+/** A tip logged at the stand; the day's tips are pooled by time on shift. */
+export interface Tip {
+  id: string;
+  amountCents: number;
+  method: 'cash' | 'digital';
+  carId: string | null;
+  loggedBy: string;
+  loggedByName: string;
+  createdAt: number;
+  voided?: boolean;
+}
+
 /** A show or game letting out at a known time: the whole crew counts down to it. */
 export interface LotEvent {
   id: string;

@@ -23,6 +23,9 @@ interface Props extends RequestActions {
   outSince: number;
   stand: { x: number; y: number };
   onEditEvent: () => void;
+  /** my shift: "Clock in", or time on and today's pool; opens shift and tips */
+  shift: { on: boolean; time: string; pool: string };
+  onShift: () => void;
   /** the let-out time while it's still ahead */
   preUntil?: number;
   /** show the guest's QR and link (team accounts only) */
@@ -225,6 +228,17 @@ export function LivePanel(p: Props) {
         <div>
           <b>{Math.max(0, p.spots.length - (p.cars.length - p.orphans.length))}</b> open
         </div>
+        <button className={`shift-tile ${p.shift.on ? 'on' : ''}`} onClick={p.onShift} aria-label="Shift and tips">
+          {p.shift.on ? (
+            <>
+              <b>{p.shift.pool}</b> {p.shift.time}
+            </>
+          ) : (
+            <>
+              <b>Clock in</b> pool {p.shift.pool}
+            </>
+          )}
+        </button>
       </div>
 
       {p.event && (
