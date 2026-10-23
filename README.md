@@ -29,11 +29,11 @@ Without those variables, the app runs in single-device mode and saves to the bro
 
 ### Before going live
 
-In the Supabase dashboard, open Authentication → URL Configuration and set **Site URL** to `https://keganberg.github.io/Valetate/` (and add it under Redirect URLs), so confirmation and sign-in emails link back to the app.
+In the Supabase dashboard, open Authentication → URL Configuration and set **Site URL** to the Netlify site address (and add it under Redirect URLs), so confirmation and sign-in emails link back to the app.
 
 ## Deploy
 
-Every push to `main` is tested, built, and published to GitHub Pages by `.github/workflows/deploy.yml`. Pages must use **GitHub Actions** as its source (Settings → Pages).
+Netlify builds and publishes the site from `main` using `netlify.toml`, and every pull request gets a deploy preview. GitHub Actions (`.github/workflows/ci.yml`) runs the tests and the build on each push.
 
 ## Data model
 
