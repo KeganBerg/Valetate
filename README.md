@@ -29,7 +29,11 @@ Without those variables, the app runs in single-device mode and saves to the bro
 
 ### Before going live
 
-In the Supabase dashboard, open Authentication → URL Configuration and set **Site URL** to wherever the app is hosted, so confirmation and sign-in emails link back to it.
+In the Supabase dashboard, open Authentication → URL Configuration and set **Site URL** to `https://keganberg.github.io/Valetate/` (and add it under Redirect URLs), so confirmation and sign-in emails link back to the app.
+
+## Deploy
+
+Every push to `main` is tested, built, and published to GitHub Pages by `.github/workflows/deploy.yml`. Pages must use **GitHub Actions** as its source (Settings → Pages).
 
 ## Data model
 

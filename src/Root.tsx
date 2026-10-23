@@ -101,7 +101,7 @@ function Login() {
     const res =
       mode === 'in'
         ? await auth.signInWithPassword({ email, password })
-        : await auth.signUp({ email, password, options: { data: { name: name.trim() }, emailRedirectTo: location.origin } });
+        : await auth.signUp({ email, password, options: { data: { name: name.trim() }, emailRedirectTo: location.origin + location.pathname } });
     setBusy(false);
     if (res.error) return setMsg({ kind: 'error', text: res.error.message });
     if (mode === 'up' && !res.data.session) setMsg({ kind: 'info', text: `Check ${email} for a link to confirm your account.` });
@@ -110,7 +110,7 @@ function Login() {
   const magicLink = async () => {
     if (!email) return setMsg({ kind: 'error', text: 'Enter your email first.' });
     setBusy(true);
-    const { error } = await supabase!.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin } });
+    const { error } = await supabase!.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
     setBusy(false);
     setMsg(error ? { kind: 'error', text: error.message } : { kind: 'info', text: `Sign-in link sent to ${email}.` });
   };
