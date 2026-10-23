@@ -19,6 +19,12 @@ export const localSource: DataSource = {
   moveCar: async (id, spotKey, spotLabel) =>
     saveCars(loadCars().map((c) => (c.id === id ? { ...c, spotKey, spotLabel } : c))),
   updateCar: async (id, patch) => saveCars(loadCars().map((c) => (c.id === id ? { ...c, ...patch } : c))),
+  setKeys: async (id, out) =>
+    saveCars(
+      loadCars().map((c) =>
+        c.id === id ? { ...c, ...(out ? { keysWith: 'local', keysWithName: 'You', keysOutAt: Date.now() } : { keysWith: '', keysWithName: '', keysOutAt: null }) } : c,
+      ),
+    ),
   retrieveCar: async (id) => {
     saveCars(loadCars().filter((c) => c.id !== id));
     saveRequests(loadRequests().filter((r) => r.carId !== id));

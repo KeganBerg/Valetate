@@ -1816,3 +1816,58 @@ button.retake {
   padding: 13px;
   font-size: 16px;
 }
+
+/* ---------- keys ---------- */
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+.key-row.out {
+  border-color: #b8860b;
+  background: #2b2414;
+}
+.key-row .key-where {
+  flex: 1;
+  min-width: 0;
+}
+.key-row button {
+  flex: none;
+  font-weight: 600;
+}
+.keys-out h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.keys-out ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+.keys-out li {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.keys-out .key-car {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+}
+.keys-out li.late .key-car {
+  border-color: var(--red);
+  background: #3a1d1f;
+}
+.keys-out li > button:last-child {
+  flex: none;
+}

@@ -99,6 +99,12 @@ export interface ParkedCar {
   guestToken?: string;
   notes: string;
   parkedAt: number;
+  /** hook or box the keys hang on; empty means the same number as the tag */
+  keySlot?: string;
+  /** who has the keys off the board (user id); empty when they're on the board */
+  keysWith?: string;
+  keysWithName?: string;
+  keysOutAt?: number | null;
 }
 
 /** Someone asked for a parked car; a valet claims it and brings it up. */

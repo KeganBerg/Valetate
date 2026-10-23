@@ -2,7 +2,7 @@ import type { CarPhoto, CarRequest, LotMap, ParkedCar, PhotoSide } from '../type
 import type { Outbox } from './outbox';
 
 export type CarDetails = Partial<
-  Pick<ParkedCar, 'plate' | 'color' | 'make' | 'vehicle' | 'ownerName' | 'ownerPhone' | 'ticket' | 'notes'>
+  Pick<ParkedCar, 'plate' | 'color' | 'make' | 'vehicle' | 'ownerName' | 'ownerPhone' | 'ticket' | 'notes' | 'keySlot'>
 >;
 
 export type Role = 'admin' | 'manager' | 'valet';
@@ -32,6 +32,8 @@ export interface DataSource {
   moveCar(id: string, spotKey: string, spotLabel: string): Promise<void>;
   /** fill in details after a fast check-in */
   updateCar(id: string, patch: CarDetails): Promise<void>;
+  /** take a car's keys off the board (they're with me now), or hang them back */
+  setKeys(id: string, out: boolean): Promise<void>;
   /** the car left the lot; any request for it is finished too */
   retrieveCar(id: string): Promise<void>;
   /** who is using this device, for claiming requests */
