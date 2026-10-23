@@ -814,6 +814,26 @@ export default function App({ source, role, account, initialMaps, initialCars, c
     }
   };
 
+  // one-handed: on a phone's live lot the search sits at the bottom, by the thumb
+  const dockFind = phone && mode === 'live';
+  const findForm = (
+    <form
+      className="find"
+      onSubmit={(e) => {
+        e.preventDefault();
+        find(query);
+      }}
+    >
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={mode === 'live' ? 'Find tag, plate or spot' : 'Find spot: D 12'}
+        aria-label={mode === 'live' ? 'Find a car or spot' : 'Find a spot'}
+        enterKeyHint="search"
+      />
+    </form>
+  );
+
   return (
     <div className={`app mode-${mode}`}>
       <header className="topbar">
@@ -840,21 +860,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             </button>
           </div>
         )}
-        <form
-          className="find"
-          onSubmit={(e) => {
-            e.preventDefault();
-            find(query);
-          }}
-        >
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={mode === 'live' ? 'Find tag, plate or spot' : 'Find spot: D 12'}
-            aria-label={mode === 'live' ? 'Find a car or spot' : 'Find a spot'}
-            enterKeyHint="search"
-          />
-        </form>
+        {!dockFind && findForm}
         <div className="grow" />
         {mode === 'edit' && (
           <div className="tools">
@@ -938,7 +944,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             <button onClick={() => zoomBy(1 / 1.25)} aria-label="Zoom out">
               −
             </button>
-            <button onClick={fit} title="Fit map to screen">
+            <button className="zoom-fit" onClick={fit} title="Fit map to screen">
               {Math.round(view.z * 100)}%
             </button>
             <button onClick={() => zoomBy(1.25)} aria-label="Zoom in">
@@ -957,6 +963,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
                 <span className="tab-badge">{mapRequests.filter((r) => r.status === 'open' && !isPre(r, now)).length}</span>
               )}
             </button>
+            {dockFind && findForm}
           </div>
           {mode === 'live' && event && <EventPill event={event} onOpen={() => setPanel('inspector')} />}
           {mode === 'live' && lotFull && !event && (
