@@ -105,6 +105,8 @@ export interface ParkedCar {
   keysWith?: string;
   keysWithName?: string;
   keysOutAt?: number | null;
+  /** ids of parked cars this one is blocking in (tandem spaces, ramp stacks) */
+  blocks?: string[];
 }
 
 /** Someone asked for a parked car; a valet claims it and brings it up. */

@@ -65,6 +65,8 @@ interface Props {
   activeSpot: string | null;
   /** live mode: spots whose car has been asked for, by Spot.key */
   requested?: Map<string, 'open' | 'claimed' | 'ready'>;
+  /** live mode: spots whose car must move before a requested car can get out */
+  mustMove?: Set<string>;
   onSpotClick: (spot: Spot | null) => void;
 }
 
@@ -87,6 +89,7 @@ export function Canvas({
   now,
   activeSpot,
   requested,
+  mustMove,
   onSpotClick,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -562,6 +565,26 @@ export function Canvas({
             </g>
           );
         })}
+
+        {mustMove &&
+          liveSpots
+            .filter((sp) => mustMove.has(sp.key))
+            .map((sp) => (
+              <g key={`move-${sp.key}`} transform={`translate(${sp.cx} ${sp.cy}) rotate(${sp.rotation})`} pointerEvents="none">
+                <rect
+                  className="move-ring"
+                  x={-sp.w / 2 - 5}
+                  y={-sp.h / 2 - 5}
+                  width={sp.w + 10}
+                  height={sp.h + 10}
+                  rx={6}
+                  fill="none"
+                  stroke="#ff7a45"
+                  strokeWidth={Math.max(3, 3 / view.z)}
+                  strokeDasharray={`${Math.max(6, 6 / view.z)} ${Math.max(4, 4 / view.z)}`}
+                />
+              </g>
+            ))}
 
         {highlight && (
           <g transform={`translate(${highlight.cx} ${highlight.cy}) rotate(${highlight.rotation})`} pointerEvents="none">

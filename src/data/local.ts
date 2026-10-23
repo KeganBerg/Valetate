@@ -25,6 +25,7 @@ export const localSource: DataSource = {
         c.id === id ? { ...c, ...(out ? { keysWith: 'local', keysWithName: 'You', keysOutAt: Date.now() } : { keysWith: '', keysWithName: '', keysOutAt: null }) } : c,
       ),
     ),
+  setBlocks: async (id, blocks) => saveCars(loadCars().map((c) => (c.id === id ? { ...c, blocks } : c))),
   retrieveCar: async (id) => {
     saveCars(loadCars().filter((c) => c.id !== id));
     saveRequests(loadRequests().filter((r) => r.carId !== id));

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LATE_MS, sortQueue, waited } from '../requests';
 import { colorHex, formatElapsed } from '../ops';
+import { blockersOf } from '../stacks';
 import type { CarRequest, ParkedCar } from '../types';
 
 export interface RequestActions {
@@ -99,6 +100,7 @@ export function RequestQueue(p: Props) {
               if (!car) return null;
               const mine = r.status === 'claimed' && r.claimedBy === p.me;
               const late = r.status !== 'ready' && p.now - r.createdAt > LATE_MS;
+              const inTheWay = r.status === 'ready' ? [] : blockersOf(p.cars, car.id);
               return (
                 <li key={r.id} className={`req ${r.status} ${mine ? 'mine' : ''} ${late ? 'late' : ''}`}>
                   <button className="req-car" onClick={() => p.onFocus(car)} title="Show on map">
@@ -112,6 +114,11 @@ export function RequestQueue(p: Props) {
                         {age(r.status === 'ready' && r.readyAt ? r.readyAt : r.createdAt, p.now)} · {whoHasIt(r, p.me)}
                         {r.source === 'guest' && r.status !== 'open' ? ' · guest' : ''}
                       </span>
+                      {inTheWay.length > 0 && (
+                        <span className="must-move">
+                          Move {inTheWay.map((c) => (c.ticket ? `#${c.ticket}` : c.plate || 'a car')).join(', ')} first
+                        </span>
+                      )}
                     </span>
                   </button>
                   <NextStep r={r} car={car} me={p.me} a={p} />

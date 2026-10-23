@@ -48,6 +48,10 @@ In the Supabase dashboard, open Authentication → URL Configuration and set **S
 
 Every car's keys hang on a hook or box: the tag number unless "Key hook or box" says otherwise (check-in warns if that hook already holds another car's keys). The car card shows where the keys are: "On hook 12", or "With Sam · 6m" once someone taps **Take keys**. Claiming a request takes the keys automatically. "Keys out" in the Live lot lists every key off the board, longest first, and turns red after 15 minutes when the car isn't on its way out. Stored in `parked_cars.key_slot`, `keys_with`, `keys_with_name` and `keys_out_at`.
 
+### Stacked cars ("blocked by")
+
+When a car is parked in front of another (tandem spaces, a ramp stack), "+ Blocking a car in?" at check-in, or "Blocking…" on the car card, offers the parked cars in the neighbouring spaces to tap. A request for a blocked-in car then says "Move #14 first" in the queue and on its card (outermost car first, following chains), and the cars in the way get a dashed orange ring on the map. Moving a car clears the stack it was part of. Typing a spot number while moving a car drops it there. Stored in `parked_cars.blocks` (ids of the cars it blocks).
+
 ### Adding automatic texts later (Twilio)
 
 The data is ready for it: requests record a `source` (`staff`, `guest`, `sms`), cars keep `owner_phone` and `guest_token`. The plan is a Supabase Edge Function that sends the welcome text (with the guest link) when a car is parked with a phone number, the "your car is ready" text when a request turns `ready`, and accepts "reply 1 to request" through a Twilio webhook. Setup needed: a Twilio account, a phone number (US: toll-free verification or A2P 10DLC registration, which can take days), and `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` saved as Edge Function secrets.

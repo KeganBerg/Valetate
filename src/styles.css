@@ -1871,3 +1871,50 @@ button.retake {
 .keys-out li > button:last-child {
   flex: none;
 }
+
+/* ---------- stacked cars ---------- */
+.chips.blocks-pick button {
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.chips.blocks-pick button.on {
+  background: #ff7a45;
+  border-color: #ff7a45;
+  color: #1b1208;
+}
+.blocks-edit {
+  margin-top: 10px;
+}
+.blocks-edit .hint {
+  margin: 0 0 8px;
+}
+.actions button.on {
+  border-color: #ff7a45;
+}
+.blocked-warn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #3a2216;
+  border: 1px solid #ff7a45;
+  color: #ffd2bd;
+}
+.blocked-warn button {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border-color: #ff7a45;
+  font-weight: 700;
+  color: #fff;
+}
+.must-move {
+  display: block;
+  color: #ff9a6b;
+  font-weight: 700;
+  font-size: 12px;
+}
