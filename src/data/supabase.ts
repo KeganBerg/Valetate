@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { CarRequest, LotMap, MapItem, ParkedCar } from '../types';
+import type { CarPhoto, CarRequest, LotMap, MapItem, ParkedCar, PhotoSide } from '../types';
 import type { CarDetails, DataSource, Role } from './source';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -136,6 +136,30 @@ const toRequest = (r: RequestRow): CarRequest => ({
   claimedByName: r.claimed_by_name,
   claimedAt: r.claimed_at ? Date.parse(r.claimed_at) : null,
   readyAt: r.ready_at ? Date.parse(r.ready_at) : null,
+});
+
+interface PhotoRow {
+  id: string;
+  car_id: string;
+  side: PhotoSide;
+  path: string;
+  damage: boolean;
+  note: string;
+  taken_at: string;
+  taken_by_name: string;
+}
+
+const BUCKET = 'car-photos';
+
+const toPhoto = (r: PhotoRow, url: string): CarPhoto => ({
+  id: r.id,
+  carId: r.car_id,
+  side: r.side,
+  url,
+  damage: r.damage,
+  note: r.note,
+  takenAt: Date.parse(r.taken_at),
+  takenByName: r.taken_by_name,
 });
 
 const DETAIL_COLUMNS: Record<keyof CarDetails, string> = {
@@ -354,6 +378,39 @@ export function cloudSource(companyId: string, userId: string, userName: string)
           .update({ status: 'parked', retrieved_at: null, retrieved_by: null })
           .eq('id', car.id),
       );
+    },
+    async listPhotos(carId) {
+      const rows = check(await db().from('car_photos').select('*').eq('car_id', carId).order('taken_at')) as PhotoRow[];
+      if (!rows.length) return [];
+      // the bucket is private: show pictures through short-lived signed links
+      const signed = check(await db().storage.from(BUCKET).createSignedUrls(rows.map((r) => r.path), 3600)) as {
+        path: string | null;
+        signedUrl: string;
+      }[];
+      const byPath = new Map(signed.map((x) => [x.path, x.signedUrl]));
+      return rows.map((r) => toPhoto(r, byPath.get(r.path) ?? ''));
+    },
+    async addPhoto({ id, car, side, blob, takenAt }) {
+      const path = `${companyId}/${car.id}/${id}.jpg`;
+      const up = await db().storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+      // a retry after a dropped response finds the file already there: that's fine
+      if (up.error && !/exists|duplicate/i.test(up.error.message)) throw new Error(up.error.message);
+      const row = {
+        id,
+        company_id: companyId,
+        car_id: car.id,
+        side,
+        path,
+        taken_at: new Date(takenAt).toISOString(),
+        taken_by: userId,
+        taken_by_name: userName,
+      };
+      const ins = await db().from('car_photos').insert(row);
+      if (ins.error && ins.error.code !== '23505') throw new Error(ins.error.message);
+      return toPhoto({ ...row, damage: false, note: '' }, URL.createObjectURL(blob));
+    },
+    async setPhotoDamage(id, damage) {
+      check(await db().from('car_photos').update({ damage }).eq('id', id));
     },
     subscribe(on) {
       const ch = db()

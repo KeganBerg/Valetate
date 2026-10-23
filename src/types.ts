@@ -118,3 +118,18 @@ export interface CarRequest {
   claimedAt: number | null;
   readyAt: number | null;
 }
+
+export type PhotoSide = 'front' | 'driver' | 'back' | 'passenger' | 'closeup';
+
+/** One walkaround picture: proof of how the car looked when we took it. */
+export interface CarPhoto {
+  id: string;
+  carId: string;
+  side: PhotoSide;
+  /** something the browser can show (signed URL or object URL) */
+  url: string;
+  damage: boolean;
+  note: string;
+  takenAt: number;
+  takenByName: string;
+}
