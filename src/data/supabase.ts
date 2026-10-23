@@ -36,10 +36,19 @@ export interface Member {
 
 export interface Invite {
   id: string;
-  email: string;
+  /** who the link is for, as the admin typed it */
+  label: string;
   role: Role;
+  code: string;
   created_at: string;
+  expires_at: string;
 }
+
+/** The link an admin texts to a new teammate. */
+export const inviteLink = (code: string) => `${location.origin}${location.pathname}?join=${code}`;
+
+/** "A1B2C3D4E5F6" -> "A1B2-C3D4-E5F6", easier to read out loud */
+export const formatCode = (code: string) => code.match(/.{1,4}/g)?.join('-') ?? code;
 
 // ---------- rows <-> app types ----------
 
@@ -163,8 +172,9 @@ export async function myMemberships(userId: string): Promise<Membership[]> {
   return rows.filter((r) => r.companies).map((r) => ({ role: r.role, company: r.companies! }));
 }
 
-export async function acceptInvites(name: string): Promise<number> {
-  return check(await db().rpc('accept_invites', { my_name: name })) as number;
+/** Join the company behind an invite link or code; returns its id. */
+export async function joinWithCode(code: string, name: string): Promise<string> {
+  return check(await db().rpc('join_with_code', { invite_code: code, my_name: name })) as string;
 }
 
 export async function createCompany(companyName: string, myName: string): Promise<string> {
@@ -183,21 +193,23 @@ export const team = {
     return check(
       await db()
         .from('invites')
-        .select('id, email, role, created_at')
+        .select('id, label, role, code, created_at, expires_at')
         .eq('company_id', companyId)
         .is('accepted_at', null)
+        .gt('expires_at', new Date().toISOString())
         .order('created_at'),
     ) as Invite[];
   },
-  async invite(companyId: string, email: string, role: Role, by: string) {
-    check(
+  /** a new one-time invite link; returns its code */
+  async invite(companyId: string, role: Role, label: string, by: string): Promise<string> {
+    const row = check(
       await db()
         .from('invites')
-        .upsert(
-          { company_id: companyId, email: email.trim().toLowerCase(), role, invited_by: by, accepted_at: null },
-          { onConflict: 'company_id,email' },
-        ),
-    );
+        .insert({ company_id: companyId, role, label: label.trim(), invited_by: by })
+        .select('code')
+        .single(),
+    ) as { code: string };
+    return row.code;
   },
   async revokeInvite(id: string) {
     check(await db().from('invites').delete().eq('id', id));

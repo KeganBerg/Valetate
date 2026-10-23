@@ -5,10 +5,10 @@ import { TeamDialog } from './components/TeamDialog';
 import { localSource } from './data/local';
 import { canEditMaps, type DataSource, type Role } from './data/source';
 import {
-  acceptInvites,
   cloudSource,
   createCompany,
   displayName,
+  joinWithCode,
   myMemberships,
   supabase,
   type Membership,
@@ -16,6 +16,30 @@ import {
 import type { LotMap, ParkedCar } from './types';
 
 const COMPANY_KEY = 'valetate.company.v1';
+const JOIN_KEY = 'valetate.joinCode';
+
+// an invite link (?join=CODE) is remembered until the person has signed in, then used once
+function pendingJoinCode(): string | null {
+  try {
+    const url = new URL(location.href);
+    const code = url.searchParams.get('join');
+    if (code) {
+      localStorage.setItem(JOIN_KEY, code);
+      url.searchParams.delete('join');
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+    }
+    return localStorage.getItem(JOIN_KEY);
+  } catch {
+    return null;
+  }
+}
+function clearJoinCode() {
+  try {
+    localStorage.removeItem(JOIN_KEY);
+  } catch {
+    // nothing remembered
+  }
+}
 
 function Splash({ text = 'Loading…' }: { text?: string }) {
   return (
@@ -86,8 +110,9 @@ function Workspace({
   return <App source={source} role={role} account={account} initialMaps={data.maps} initialCars={data.cars} />;
 }
 
-function Login() {
-  const [mode, setMode] = useState<'in' | 'up'>('in');
+function Login({ invited }: { invited: boolean }) {
+  // someone opening an invite link most likely has no account yet
+  const [mode, setMode] = useState<'in' | 'up'>(invited ? 'up' : 'in');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -121,7 +146,11 @@ function Login() {
       <form className="screen-card" onSubmit={submit}>
         <span className="logo big">V</span>
         <h1>{mode === 'in' ? 'Sign in to Valetate' : 'Create your account'}</h1>
-        <p className="muted">The live lot for your whole valet team.</p>
+        {invited ? (
+          <p className="info">You've been invited to a team. Create your account (or sign in) to join.</p>
+        ) : (
+          <p className="muted">The live lot for your whole valet team.</p>
+        )}
         {mode === 'up' && (
           <label className="field">
             <span>Your name</span>
@@ -163,21 +192,58 @@ function Login() {
   );
 }
 
-function Onboarding({ session, onDone }: { session: Session; onDone: () => void }) {
+function Onboarding({
+  session,
+  onDone,
+  joinError,
+}: {
+  session: Session;
+  onDone: (companyId?: string) => void;
+  joinError: string | null;
+}) {
   const [company, setCompany] = useState('');
+  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const email = session.user.email ?? '';
+  const [codeError, setCodeError] = useState<string | null>(joinError);
 
   return (
     <div className="screen">
       <div className="screen-card">
         <span className="logo big">V</span>
         <h1>Welcome, {displayName(session.user)}</h1>
-        <p className="muted">
-          Joining a team? Ask your admin to invite <b>{email}</b>, then tap “Check again”.
-        </p>
-        <button onClick={onDone}>Check again</button>
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            setCodeError(null);
+            try {
+              onDone(await joinWithCode(code, displayName(session.user)));
+            } catch (err) {
+              setCodeError(err instanceof Error ? err.message : String(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <h2>Joining a team?</h2>
+          <p className="muted small">Open the invite link your admin sent you, or type its code here.</p>
+          <label className="field">
+            <span>Invite code</span>
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="A1B2-C3D4-E5F6"
+              autoCapitalize="characters"
+              autoComplete="off"
+              required
+            />
+          </label>
+          {codeError && <p className="error">{codeError}</p>}
+          <button className="primary wide" disabled={busy}>
+            Join team
+          </button>
+        </form>
         <hr />
         <form
           onSubmit={async (e) => {
@@ -185,8 +251,7 @@ function Onboarding({ session, onDone }: { session: Session; onDone: () => void 
             setBusy(true);
             setError(null);
             try {
-              await createCompany(company, displayName(session.user));
-              onDone();
+              onDone(await createCompany(company, displayName(session.user)));
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -237,6 +302,8 @@ function Cloud() {
   const [companyId, setCompanyId] = useState<string | null>(() => localStorage.getItem(COMPANY_KEY));
   const [picking, setPicking] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
+  const [joinCode] = useState(pendingJoinCode);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   useEffect(() => {
     supabase!.auth.getSession().then(({ data }) => setSession(data.session));
@@ -248,9 +315,27 @@ function Cloud() {
   const refresh = useCallback(async () => {
     if (!session) return;
     setMemberships(null);
-    await acceptInvites(displayName(session.user)).catch(() => 0);
+    const code = localStorage.getItem(JOIN_KEY);
+    if (code) {
+      clearJoinCode();
+      try {
+        const joined = await joinWithCode(code, displayName(session.user));
+        localStorage.setItem(COMPANY_KEY, joined);
+        setCompanyId(joined);
+      } catch (e) {
+        setJoinError(e instanceof Error ? e.message : String(e));
+      }
+    }
     setMemberships(await myMemberships(session.user.id).catch(() => []));
   }, [session?.user.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openCompany = (id?: string) => {
+    if (id) {
+      localStorage.setItem(COMPANY_KEY, id);
+      setCompanyId(id);
+    }
+    refresh();
+  };
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -262,9 +347,9 @@ function Cloud() {
   );
 
   if (session === undefined) return <Splash />;
-  if (!session) return <Login />;
+  if (!session) return <Login invited={!!joinCode} />;
   if (!memberships) return <Splash text="Finding your team…" />;
-  if (!memberships.length) return <Onboarding session={session} onDone={refresh} />;
+  if (!memberships.length) return <Onboarding session={session} onDone={openCompany} joinError={joinError} />;
   if (!current || picking)
     return (
       <CompanyPicker
