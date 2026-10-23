@@ -15,6 +15,7 @@ import {
   joinWithCode,
   myMemberships,
   supabase,
+  team,
   type Membership,
 } from './data/supabase';
 import type { LotMap, ParkedCar } from './types';
@@ -326,73 +327,105 @@ function Onboarding({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [codeError, setCodeError] = useState<string | null>(joinError);
+  const [path, setPath] = useState<'choose' | 'join' | 'start'>(joinError ? 'join' : 'choose');
+  useBackToClose(path !== 'choose', () => setPath('choose'));
+  const first = displayName(session.user).split(/[\s@]/)[0];
 
   return (
     <div className="screen">
       <div className="screen-card">
         <span className="logo big">V</span>
-        <h1>Welcome, {displayName(session.user)}</h1>
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setBusy(true);
-            setCodeError(null);
-            try {
-              onDone(await joinWithCode(code, displayName(session.user)));
-            } catch (err) {
-              setCodeError(err instanceof Error ? err.message : String(err));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <h2>Joining a team?</h2>
-          <p className="muted small">Open the invite link your admin sent you, or type its code here.</p>
-          <label className="field">
-            <span>Invite code</span>
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="A1B2-C3D4-E5F6"
-              autoCapitalize="characters"
-              autoComplete="off"
-              required
-            />
-          </label>
-          {codeError && <p className="error">{codeError}</p>}
-          <button className="primary wide" disabled={busy}>
-            Join team
+        <h1>Welcome, {first}</h1>
+        {path === 'choose' && (
+          <>
+            <p className="muted">How are you using Valetate?</p>
+            <div className="choice-tiles">
+              <button className="choice-tile" onClick={() => setPath('join')}>
+                <span className="choice-icon" aria-hidden="true">🔑</span>
+                <b>Join my team</b>
+                <span className="muted small">I have an invite link or code from my admin.</span>
+              </button>
+              <button className="choice-tile" onClick={() => setPath('start')}>
+                <span className="choice-icon" aria-hidden="true">🅿️</span>
+                <b>Start a company</b>
+                <span className="muted small">Set up your lot and invite your valets.</span>
+              </button>
+            </div>
+          </>
+        )}
+        {path === 'join' && (
+          <form
+            className="rise"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setBusy(true);
+              setCodeError(null);
+              try {
+                onDone(await joinWithCode(code, displayName(session.user)));
+              } catch (err) {
+                setCodeError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <h2>Join my team</h2>
+            <p className="muted small">Open the invite link your admin sent you, or type its code here.</p>
+            <label className="field">
+              <span>Invite code</span>
+              <input
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="A1B2-C3D4-E5F6"
+                autoCapitalize="characters"
+                autoComplete="off"
+                autoFocus
+                required
+              />
+            </label>
+            {codeError && <p className="error">{codeError}</p>}
+            <button className="primary wide" disabled={busy}>
+              {busy ? 'Joining…' : 'Join team'}
+            </button>
+          </form>
+        )}
+        {path === 'start' && (
+          <form
+            className="rise"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setBusy(true);
+              setError(null);
+              try {
+                onDone(await createCompany(company, displayName(session.user)));
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <h2>Start a company</h2>
+            <p className="muted small">You'll be its admin. Next you'll pick a map for your lot and invite your team.</p>
+            <label className="field">
+              <span>Company name</span>
+              <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Broward Key Group" autoFocus required />
+            </label>
+            {error && <p className="error">{error}</p>}
+            <button className="primary wide" disabled={busy}>
+              {busy ? 'Creating…' : 'Create company'}
+            </button>
+          </form>
+        )}
+        {path !== 'choose' ? (
+          <button className="link" onClick={() => setPath('choose')}>
+            Back
           </button>
-        </form>
-        <hr />
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setBusy(true);
-            setError(null);
-            try {
-              onDone(await createCompany(company, displayName(session.user)));
-            } catch (err) {
-              setError(err instanceof Error ? err.message : String(err));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <h2>Or start your company</h2>
-          <p className="muted small">You'll be its admin and can invite your valets and managers.</p>
-          <label className="field">
-            <span>Company name</span>
-            <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Broward Key Group" required />
-          </label>
-          {error && <p className="error">{error}</p>}
-          <button className="primary wide" disabled={busy}>
-            Create company
+        ) : (
+          <button className="link" onClick={() => supabase!.auth.signOut()}>
+            Sign out
           </button>
-        </form>
-        <button className="link" onClick={() => supabase!.auth.signOut()}>
-          Sign out
-        </button>
+        )}
       </div>
     </div>
   );
@@ -431,6 +464,7 @@ function Cloud() {
   const [joinCode] = useState(pendingJoinCode);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [recovering, setRecovering] = useState(false);
+  const [teamSize, setTeamSize] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     supabase!.auth.getSession().then(({ data }) => setSession(data.session));
@@ -496,6 +530,13 @@ function Cloud() {
     [current?.company.id, userId], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // how many people are on the team, for the admin's setup steps
+  const adminOf = current?.role === 'admin' ? current.company.id : null;
+  useEffect(() => {
+    if (!adminOf || showTeam) return;
+    team.members(adminOf).then((m) => setTeamSize(m.length), () => {});
+  }, [adminOf, showTeam]);
+
   if (session === undefined) return <Splash />;
   if (!session) return <Login invited={!!joinCode} />;
   if (recovering) return <NewPassword onDone={() => setRecovering(false)} />;
@@ -515,6 +556,7 @@ function Cloud() {
     );
 
   const account = {
+    teamSize: current.role === 'admin' ? teamSize : undefined,
     name: displayName(session.user),
     email: session.user.email ?? '',
     companyName: current.company.name,

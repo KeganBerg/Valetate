@@ -14,6 +14,7 @@ import { blockersOf, blocksAfterMove } from './stacks';
 import { currentMapId, setCurrentMapId } from './storage';
 import { useBackToClose } from './dialog';
 import { saveLot } from './lotCache';
+import { GettingStarted } from './components/GettingStarted';
 import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
 import { liveRequests, newGuestToken } from './requests';
@@ -87,6 +88,8 @@ export interface Account {
   onSignOut: () => void;
   onTeam?: () => void;
   onSwitchCompany?: () => void;
+  /** people on the team (admins only; for the setup steps) */
+  teamSize?: number;
 }
 
 interface Props {
@@ -140,6 +143,28 @@ export default function App({ source, role, account, initialMaps, initialCars, c
     return () => window.clearTimeout(t);
   }, [unsynced > 0]); // eslint-disable-line react-hooks/exhaustive-deps
   const [cars, setCars] = useState<ParkedCar[]>(initialCars);
+  // a new company's admin sees three setup steps until they're done or hidden
+  const setupKey = cacheKey && `${cacheKey}.setup`;
+  const [setup, setSetup] = useState<{ hidden?: boolean; parked?: boolean }>(() => {
+    try {
+      return (setupKey && JSON.parse(localStorage.getItem(setupKey) ?? '{}')) || {};
+    } catch {
+      return {};
+    }
+  });
+  const saveSetup = (patch: { hidden?: boolean; parked?: boolean }) =>
+    setSetup((cur) => {
+      const next = { ...cur, ...patch };
+      try {
+        if (setupKey) localStorage.setItem(setupKey, JSON.stringify(next));
+      } catch {
+        // not remembered; it shows again next time
+      }
+      return next;
+    });
+  useEffect(() => {
+    if (cars.length && !setup.parked) saveSetup({ parked: true });
+  }, [cars.length]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!cacheKey) return;
     const t = window.setTimeout(() => saveLot(cacheKey, maps, cars), 1000);
@@ -937,6 +962,32 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             <div className="full-pill" role="status">
               Lot almost full · {openSpots} open
             </div>
+          )}
+          {role === 'admin' && account && setupKey && !setup.hidden && (
+            <GettingStarted
+              company={account.companyName}
+              onHide={() => saveSetup({ hidden: true })}
+              steps={[
+                {
+                  label: 'Draw your lot',
+                  hint: 'Start from a template, then move rows and spots to match your lot.',
+                  done: maps.length > 0,
+                  action: { label: 'Pick a map', run: () => setShowMaps(true) },
+                },
+                {
+                  label: 'Invite your team',
+                  hint: 'Text your valets a link. They join with one tap.',
+                  done: (account.teamSize ?? 1) > 1,
+                  action: account.onTeam && { label: 'Invite', run: account.onTeam },
+                },
+                {
+                  label: 'Park your first car',
+                  hint: 'On the live lot, tap an open spot.',
+                  done: !!setup.parked,
+                  action: { label: 'Live lot', run: () => setMode('live') },
+                },
+              ]}
+            />
           )}
           {toast && (
             <div className={`toast ${toast.undo ? 'with-action' : ''}`} role="status">
