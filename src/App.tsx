@@ -22,6 +22,7 @@ import type { CarRequest, LotEvent, LotMap, MapItem, ParkedCar, Shift, Spot, Tip
 import { almostFull, isPre, standPoint } from './surge';
 import { EventDialog, EventPill } from './components/EventMode';
 import { ShiftSheet } from './components/ShiftSheet';
+import { Dashboard } from './components/Dashboard';
 import { dayStart, duration, money, splitPool } from './shifts';
 
 function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean } {
@@ -263,6 +264,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   const [tips, setTips] = useState<Tip[]>([]);
   const [tipUrl, setTipUrl] = useState('');
   const [shiftOpen, setShiftOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const refreshTeam = useCallback(async () => {
     const from = dayStart(Date.now());
     const [s, t, u] = await Promise.all([
@@ -847,6 +849,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             {account?.onSwitchCompany && <button onClick={account.onSwitchCompany}>Switch company</button>}
             {account && <hr />}
             {mode === 'live' && <button onClick={() => setShiftOpen(true)}>Shift and tips</button>}
+            {role !== 'valet' && <button onClick={() => setReportOpen(true)}>Stand report</button>}
             {mode === 'live' && <button onClick={() => setEventDialog(true)}>{event ? 'Event: change let-out time' : 'Start event mode'}</button>}
             <button onClick={() => exportPng(map).catch((e) => flash(e.message))}>Save map as image (PNG)</button>
             <button onClick={() => exportSvg(map)}>Save map as vector (SVG)</button>
@@ -1073,6 +1076,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
           }}
         />
       )}
+      {reportOpen && <Dashboard source={source} onClose={() => setReportOpen(false)} />}
       {shiftOpen && (
         <ShiftSheet
           me={source.me}
