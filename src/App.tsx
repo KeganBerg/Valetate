@@ -109,6 +109,14 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   const [highlight, setHighlight] = useState<Spot | null>(null);
   const [toast, setToast] = useState<{ msg: string; undo?: () => void } | null>(null);
   const [live, setLive] = useState(true);
+  const [unsynced, setUnsynced] = useState(() => source.outbox?.count() ?? 0);
+  // a change normally syncs in a blink; only mention it once it has been waiting a moment
+  const [showUnsynced, setShowUnsynced] = useState(false);
+  useEffect(() => {
+    if (!unsynced) return setShowUnsynced(false);
+    const t = window.setTimeout(() => setShowUnsynced(true), 1500);
+    return () => window.clearTimeout(t);
+  }, [unsynced > 0]); // eslint-disable-line react-hooks/exhaustive-deps
   const [cars, setCars] = useState<ParkedCar[]>(initialCars);
   const [activeSpotKey, setActiveSpotKey] = useState<string | null>(null);
   const [moving, setMoving] = useState<ParkedCar | null>(null);
@@ -238,7 +246,11 @@ export default function App({ source, role, account, initialMaps, initialCars }:
 
   // a phone that slept or lost signal missed changes: catch up as soon as it's back
   useEffect(() => {
-    const catchUp = () => document.visibilityState === 'visible' && refreshCars();
+    const catchUp = () => {
+      if (document.visibilityState !== 'visible') return;
+      source.outbox?.flush().then(refreshCars);
+      refreshCars();
+    };
     document.addEventListener('visibilitychange', catchUp);
     window.addEventListener('online', catchUp);
     const offline = () => setLive(false);
@@ -248,7 +260,20 @@ export default function App({ source, role, account, initialMaps, initialCars }:
       window.removeEventListener('online', catchUp);
       window.removeEventListener('offline', offline);
     };
-  }, [refreshCars]);
+  }, [source, refreshCars]);
+
+  // car changes made with no signal: show how many are waiting, and say so if one is refused later
+  useEffect(
+    () =>
+      source.outbox?.subscribe((count, dropped) => {
+        setUnsynced(count);
+        if (dropped !== undefined) {
+          flash(`A change made offline didn't save: ${friendlyError(dropped)}`);
+          refreshCars();
+        }
+      }),
+    [source, flash, refreshCars],
+  );
 
   const run = (p: Promise<unknown>, undo?: () => void) =>
     p.catch((e) => {
@@ -716,9 +741,11 @@ export default function App({ source, role, account, initialMaps, initialCars }:
               )}
             </div>
           )}
-          {!live && source.kind === 'cloud' && mode === 'live' && (
+          {mode === 'live' && ((showUnsynced && unsynced > 0) || (!live && source.kind === 'cloud')) && (
             <div className="conn" role="status">
-              Reconnecting… the lot may be out of date
+              {showUnsynced && unsynced > 0
+                ? `No signal · ${unsynced} ${unsynced === 1 ? 'change' : 'changes'} saved on this phone`
+                : 'Reconnecting… the lot may be out of date'}
             </div>
           )}
         </div>
