@@ -23,6 +23,7 @@ import type { CarRequest, LotEvent, LotMap, MapItem, ParkedCar, Shift, Spot, Tip
 import { almostFull, isPre, standPoint } from './surge';
 import { EventDialog, EventPill } from './components/EventMode';
 import { dayStart, duration, money, splitPool } from './shifts';
+import { Loading } from './components/Loading';
 
 // opened now and then: loaded the first time they're needed
 const GuestLinkDialog = lazy(() => import('./components/GuestLink').then((m) => ({ default: m.GuestLinkDialog })));
@@ -1148,12 +1149,12 @@ export default function App({ source, role, account, initialMaps, initialCars, c
         />
       )}
       {reportOpen && (
-        <Suspense fallback={null}>
+        <Suspense fallback={<Loading />}>
           <Dashboard source={source} onClose={() => setReportOpen(false)} />
         </Suspense>
       )}
       {shiftOpen && (
-        <Suspense fallback={null}>
+        <Suspense fallback={<Loading />}>
           <ShiftSheet
             me={source.me}
             isManager={role !== 'valet'}
@@ -1192,7 +1193,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
           />
         </Suspense>
       )}
-      <Suspense fallback={null}>
+      <Suspense fallback={<Loading />}>
         {photoCar && <PhotoSheet car={photoCar} source={source} queue={photoQueue} onClose={() => setPhotoCar(null)} />}
         {guestLinkCar && <GuestLinkDialog car={guestLinkCar} company={account?.companyName} onClose={() => setGuestLinkCar(null)} />}
       </Suspense>
