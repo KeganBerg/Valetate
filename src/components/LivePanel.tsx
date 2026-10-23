@@ -4,11 +4,12 @@ import { CAR_COLORS, CAR_MAKES, carMatches, colorHex, formatElapsed, nextOpenSpo
 import type { CarRequest, ParkedCar, Spot } from '../types';
 import { carsWithKeysOut, hookTaken, keyHook, KEYS_LATE_MS } from '../keys';
 import { matchPlate } from '../plates';
+import { blockedBy, blockersOf, carsNear } from '../stacks';
 import { PlateScanner } from './PlateScanner';
 import { RequestQueue, RequestStatus, type RequestActions } from './RequestQueue';
 import { SheetHandle } from './SheetHandle';
 
-type NewCar = Omit<ParkedCar, 'id' | 'mapId' | 'spotKey' | 'spotLabel' | 'parkedAt' | 'keysWith' | 'keysWithName' | 'keysOutAt'>;
+type NewCar = Omit<ParkedCar, 'id' | 'mapId' | 'spotKey' | 'spotLabel' | 'parkedAt' | 'keysWith' | 'keysWithName' | 'keysOutAt' | 'blocks'> & { blocks: string[] };
 
 interface Props extends RequestActions {
   /** open and claimed requests for this lot */
@@ -35,6 +36,8 @@ interface Props extends RequestActions {
   onPark: (spot: Spot, car: NewCar) => void;
   onUpdate: (car: ParkedCar, patch: CarDetails) => void;
   onRetrieve: (car: ParkedCar) => void;
+  /** which parked cars this one blocks in */
+  onBlocks: (car: ParkedCar, blocks: string[]) => void;
   /** keys off the board with me, or back on their hook */
   onKeys: (car: ParkedCar, out: boolean) => void;
   onStartMove: (car: ParkedCar | null) => void;
@@ -45,7 +48,7 @@ interface Props extends RequestActions {
   onClose: () => void;
 }
 
-const EMPTY: NewCar = { ticket: '', color: '', make: '', plate: '', vehicle: '', ownerName: '', ownerPhone: '', notes: '', keySlot: '' };
+const EMPTY: NewCar = { ticket: '', color: '', make: '', plate: '', vehicle: '', ownerName: '', ownerPhone: '', notes: '', keySlot: '', blocks: [] };
 
 function ColorDot({ name, size = 14 }: { name: string; size?: number }) {
   const hex = colorHex(name);
@@ -55,6 +58,30 @@ function ColorDot({ name, size = 14 }: { name: string; size?: number }) {
 
 function carTitle(c: Pick<ParkedCar, 'color' | 'make' | 'vehicle'>) {
   return [c.color, c.make, c.vehicle].filter(Boolean).join(' ') || 'Car';
+}
+
+const tagOf = (c: ParkedCar) => (c.ticket ? `#${c.ticket}` : c.plate || 'Car');
+
+/** Tap the cars this one is parked in front of. Only neighbours are offered. */
+function BlocksPicker({ options, value, onChange }: { options: ParkedCar[]; value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <div className="chips blocks-pick" role="group" aria-label="Cars this one blocks in">
+      {options.map((c) => {
+        const on = value.includes(c.id);
+        return (
+          <button
+            type="button"
+            key={c.id}
+            aria-pressed={on}
+            className={on ? 'on' : ''}
+            onClick={() => onChange(on ? value.filter((id) => id !== c.id) : [...value, c.id])}
+          >
+            {tagOf(c)} · {c.spotLabel}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 /** makes shown before "More": enough for most cars without pushing the Park button down */
@@ -141,6 +168,7 @@ export function LivePanel(p: Props) {
   const [editing, setEditing] = useState<NewCar | null>(null);
   const [q, setQ] = useState('');
   const [scan, setScan] = useState<'park' | 'edit' | 'find' | null>(null);
+  const [pickBlocks, setPickBlocks] = useState(false);
   const tagRef = useRef<HTMLInputElement>(null);
   const set = (v: Partial<NewCar>) => setForm((f) => ({ ...f, ...v }));
 
@@ -149,6 +177,7 @@ export function LivePanel(p: Props) {
     setForm({ ...EMPTY, ticket: p.suggestedTag });
     setMore(false);
     setEditing(null);
+    setPickBlocks(false);
   }, [p.active?.key]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => setForm((f) => (f.ticket ? f : { ...f, ticket: p.suggestedTag })), [p.suggestedTag]);
 
@@ -163,6 +192,11 @@ export function LivePanel(p: Props) {
   const dupHook = !car && form.keySlot?.trim() ? hookTaken(p.allCars, form.keySlot) : undefined;
   const keysOutList = carsWithKeysOut(p.allCars);
   const liveCarIds = new Set(p.requests.map((r) => r.carId));
+  const neighbours = p.active ? carsNear(p.spots, p.cars, p.active) : [];
+  const inTheWay = car ? blockersOf(p.allCars, car.id) : [];
+  const blocking = car ? blockedBy(p.allCars, car) : [];
+  // offer the neighbours, plus anything already marked that has since drifted out of range
+  const blockOptions = car ? [...neighbours, ...blocking.filter((b) => !neighbours.includes(b))] : neighbours;
   const list = [...p.cars].sort((a, b) => a.parkedAt - b.parkedAt).filter((c) => carMatches(c, q));
 
   const park = () => {
@@ -255,6 +289,16 @@ export function LivePanel(p: Props) {
             </span>
             <button onClick={() => p.onKeys(car, !car.keysWith)}>{car.keysWith ? `Back on ${keyHook(car) ? `hook ${keyHook(car)}` : 'board'}` : 'Take keys'}</button>
           </div>
+          {inTheWay.length > 0 && (
+            <div className="blocked-warn">
+              <b>Blocked in.</b> Move first:
+              {inTheWay.map((c) => (
+                <button key={c.id} onClick={() => p.onFind(c.ticket || c.plate)}>
+                  {tagOf(c)} · {c.spotLabel}
+                </button>
+              ))}
+            </div>
+          )}
           <dl>
             <dt>Parked</dt>
             <dd>
@@ -273,6 +317,12 @@ export function LivePanel(p: Props) {
                 <dd>
                   <a href={`tel:${car.ownerPhone}`}>{car.ownerPhone}</a>
                 </dd>
+              </>
+            )}
+            {blocking.length > 0 && (
+              <>
+                <dt>Blocking</dt>
+                <dd>{blocking.map((c) => `${tagOf(c)} (${c.spotLabel})`).join(', ')}</dd>
               </>
             )}
             {car.notes && (
@@ -297,10 +347,21 @@ export function LivePanel(p: Props) {
             <button onClick={() => p.onPhotos(car)}>📷 Photos</button>
             {p.onGuestLink && car.guestToken && <button onClick={() => p.onGuestLink!(car)}>Guest link</button>}
             <button onClick={() => p.onStartMove(car)}>Move</button>
+            {blockOptions.length > 0 && (
+              <button className={pickBlocks ? 'on' : ''} aria-expanded={pickBlocks} onClick={() => setPickBlocks(!pickBlocks)}>
+                Blocking…
+              </button>
+            )}
             <button onClick={() => setEditing({ ...EMPTY, ...car })}>
               {car.plate && car.color && car.ownerName ? 'Edit details' : 'Add details'}
             </button>
           </div>
+          {pickBlocks && (
+            <div className="blocks-edit">
+              <p className="hint">Which cars is {tagOf(car)} parked in front of? A request for one of them will say to move this car first.</p>
+              <BlocksPicker options={blockOptions} value={car.blocks ?? []} onChange={(v) => p.onBlocks(car, v)} />
+            </div>
+          )}
         </section>
       )}
 
@@ -359,6 +420,17 @@ export function LivePanel(p: Props) {
           {dupTag && <p className="warn">Tag #{form.ticket} is already parked in {dupTag.spotLabel}.</p>}
           <Chips color value={form} onChange={set} />
           <Chips value={form} onChange={set} />
+          {neighbours.length > 0 &&
+            (pickBlocks || form.blocks.length ? (
+              <div className="field">
+                <span>Parked in front of (tandem, ramp)</span>
+                <BlocksPicker options={neighbours} value={form.blocks} onChange={(blocks) => set({ blocks })} />
+              </div>
+            ) : (
+              <button type="button" className="link more" onClick={() => setPickBlocks(true)}>
+                + Blocking a car in?
+              </button>
+            ))}
           {more ? (
             <DetailFields form={form} set={set} onScan={() => setScan('park')} />
           ) : (

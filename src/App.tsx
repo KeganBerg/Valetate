@@ -10,6 +10,7 @@ import { GRID, duplicateSpotLabels, findSpot, listSpots, lotAround, snap, uid, u
 import { canEditMaps, ROLE_INFO, type DataSource, type Role } from './data/source';
 import { findCar, friendlyError, nextOpenSpot, nextTag } from './ops';
 import { keyHook } from './keys';
+import { blockersOf, blocksAfterMove } from './stacks';
 import { currentMapId, setCurrentMapId } from './storage';
 import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
@@ -207,6 +208,12 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   const requestedSpots = useMemo(() => {
     const byCar = new Map(mapCars.map((c) => [c.id, c.spotKey]));
     return new Map(mapRequests.map((r) => [byCar.get(r.carId)!, r.status]));
+  }, [mapRequests, mapCars]);
+  /** spots holding cars that must move before a requested car can get out */
+  const mustMoveSpots = useMemo(() => {
+    const keys = new Set<string>();
+    for (const r of mapRequests) if (r.status !== 'ready') for (const c of blockersOf(mapCars, r.carId)) keys.add(c.spotKey);
+    return keys;
   }, [mapRequests, mapCars]);
   const patchRequest = (id: string, patch: Partial<CarRequest>) =>
     setRequests((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -425,6 +432,11 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     commit(where === 'front' ? [...rest, ...sel] : [...sel, ...rest]);
   };
 
+  const setBlocks = (car: ParkedCar, blocks: string[]) => {
+    setCars((cs) => cs.map((c) => (c.id === car.id ? { ...c, blocks } : c)));
+    run(source.setBlocks(car.id, blocks));
+  };
+
   const setKeys = (car: ParkedCar, out: boolean) => {
     const patch = out
       ? { keysWith: source.me.id, keysWithName: source.me.name, keysOutAt: Date.now() }
@@ -497,6 +509,8 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   const find = (q: string) => {
     if (!q.trim()) return;
     const spot = findSpot(map.items, q);
+    // while moving a car, typing a spot number drops it there
+    if (moving && spot) return onSpotClick(spot);
     // in the live lot, "104" most often means tag 104, so check cars on every map first;
     // a spot label typed exactly still wins over a loose match like part of a plate
     const hit = findCar(cars, q);
@@ -523,8 +537,18 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   const onSpotClick = (s: Spot | null) => {
     if (moving && s) {
       if (occupied.has(s.key)) return flash(`Spot ${s.label} is taken`);
-      setCars((cs) => cs.map((c) => (c.id === moving.id ? { ...c, spotKey: s.key, spotLabel: s.label } : c)));
+      // a car that moves is no longer in the stack it was part of
+      const unstack = blocksAfterMove(cars, moving.id);
+      const unstacked = new Map(unstack.map((u) => [u.id, u.blocks]));
+      setCars((cs) =>
+        cs.map((c) => ({
+          ...c,
+          ...(unstacked.has(c.id) ? { blocks: unstacked.get(c.id) } : {}),
+          ...(c.id === moving.id ? { spotKey: s.key, spotLabel: s.label } : {}),
+        })),
+      );
       run(source.moveCar(moving.id, s.key, s.label));
+      for (const u of unstack) run(source.setBlocks(u.id, u.blocks));
       flash(`${carName(moving)} moved to ${s.label}`);
       setMoving(null);
       setActiveSpotKey(s.key);
@@ -708,6 +732,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             mode={mode}
             occupied={occupied}
             requested={mode === 'live' ? requestedSpots : undefined}
+            mustMove={mode === 'live' ? mustMoveSpots : undefined}
             now={now}
             activeSpot={activeSpotKey}
             onSpotClick={onSpotClick}
@@ -817,6 +842,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             onRetrieve={retrieveCar}
             onFind={find}
             onKeys={setKeys}
+            onBlocks={setBlocks}
             requests={mapRequests}
             me={source.me.id}
             onRequest={requestCar}
