@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
-import { formatElapsed, normalizePlate } from '../ops';
+import { useEffect, useRef, useState } from 'react';
+import type { CarDetails } from '../data/source';
+import { CAR_COLORS, CAR_MAKES, carMatches, colorHex, formatElapsed, nextOpenSpot } from '../ops';
 import type { ParkedCar, Spot } from '../types';
-import { normalizeSpot } from '../geometry';
 import { SheetHandle } from './SheetHandle';
+
+type NewCar = Omit<ParkedCar, 'id' | 'mapId' | 'spotKey' | 'spotLabel' | 'parkedAt'>;
 
 interface Props {
   spots: Spot[];
@@ -10,7 +12,10 @@ interface Props {
   active: Spot | null;
   now: number;
   moving: ParkedCar | null;
-  onPark: (spot: Spot, car: Omit<ParkedCar, 'id' | 'mapId' | 'spotKey' | 'spotLabel' | 'parkedAt'>) => void;
+  /** suggested tag number for the next car */
+  suggestedTag: string;
+  onPark: (spot: Spot, car: NewCar) => void;
+  onUpdate: (car: ParkedCar, patch: CarDetails) => void;
   onRetrieve: (car: ParkedCar) => void;
   onStartMove: (car: ParkedCar | null) => void;
   onFocus: (spot: Spot) => void;
@@ -18,33 +23,107 @@ interface Props {
   onClose: () => void;
 }
 
-const EMPTY = { plate: '', vehicle: '', ownerName: '', ownerPhone: '', ticket: '', notes: '' };
+const EMPTY: NewCar = { ticket: '', color: '', make: '', plate: '', vehicle: '', ownerName: '', ownerPhone: '', notes: '' };
+
+function ColorDot({ name, size = 14 }: { name: string; size?: number }) {
+  const hex = colorHex(name);
+  if (!hex) return null;
+  return <i className="color-dot" style={{ background: hex, width: size, height: size }} title={name} />;
+}
+
+function carTitle(c: Pick<ParkedCar, 'color' | 'make' | 'vehicle'>) {
+  return [c.color, c.make, c.vehicle].filter(Boolean).join(' ') || 'Car';
+}
+
+/** Big tap targets for color and make: nothing to type at rush. */
+function Chips({ value, onChange, color }: { value: Pick<NewCar, 'color' | 'make'>; onChange: (v: Partial<NewCar>) => void; color?: boolean }) {
+  if (color)
+    return (
+      <div className="chips colors" role="radiogroup" aria-label="Color">
+        {CAR_COLORS.map((c) => (
+          <button
+            type="button"
+            key={c.name}
+            role="radio"
+            aria-checked={value.color === c.name}
+            className={`color-chip ${value.color === c.name ? 'on' : ''}`}
+            style={{ background: c.hex }}
+            title={c.name}
+            aria-label={c.name}
+            onClick={() => onChange({ color: value.color === c.name ? '' : c.name })}
+          />
+        ))}
+      </div>
+    );
+  return (
+    <div className="chips makes" role="radiogroup" aria-label="Make">
+      {CAR_MAKES.map((m) => (
+        <button
+          type="button"
+          key={m}
+          role="radio"
+          aria-checked={value.make === m}
+          className={value.make === m ? 'on' : ''}
+          onClick={() => onChange({ make: value.make === m ? '' : m })}
+        >
+          {m}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DetailFields({ form, set }: { form: NewCar; set: (v: Partial<NewCar>) => void }) {
+  const field = (k: keyof NewCar, label: string, extra: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
+    <label className="field">
+      <span>{label}</span>
+      <input value={form[k]} onChange={(e) => set({ [k]: e.target.value })} {...extra} />
+    </label>
+  );
+  return (
+    <>
+      {field('plate', 'License plate', { autoCapitalize: 'characters' })}
+      {field('vehicle', 'Model', { placeholder: 'Model 3, Camry…' })}
+      <div className="row2">
+        {field('ownerName', 'Owner name')}
+        {field('ownerPhone', 'Owner phone', { type: 'tel', inputMode: 'tel' })}
+      </div>
+      {field('notes', 'Notes', { placeholder: 'Keys in box 4, scratch on bumper…' })}
+    </>
+  );
+}
 
 export function LivePanel(p: Props) {
-  const [form, setForm] = useState(EMPTY);
+  const [form, setForm] = useState<NewCar>({ ...EMPTY, ticket: p.suggestedTag });
+  const [more, setMore] = useState(false);
+  const [editing, setEditing] = useState<NewCar | null>(null);
   const [q, setQ] = useState('');
-  useEffect(() => setForm(EMPTY), [p.active?.key]);
+  const tagRef = useRef<HTMLInputElement>(null);
+  const set = (v: Partial<NewCar>) => setForm((f) => ({ ...f, ...v }));
+
+  // fresh form for each spot, with the next tag already filled in
+  useEffect(() => {
+    setForm({ ...EMPTY, ticket: p.suggestedTag });
+    setMore(false);
+    setEditing(null);
+  }, [p.active?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setForm((f) => (f.ticket ? f : { ...f, ticket: p.suggestedTag })), [p.suggestedTag]);
 
   const bySpot = new Map(p.cars.map((c) => [c.spotKey, c]));
   const car = p.active ? bySpot.get(p.active.key) : undefined;
   const spotByKey = new Map(p.spots.map((s) => [s.key, s]));
-  const nq = normalizePlate(q);
-  const list = [...p.cars]
-    .sort((a, b) => a.parkedAt - b.parkedAt)
-    .filter(
-      (c) =>
-        !nq ||
-        normalizePlate(c.plate).includes(nq) ||
-        normalizeSpot(c.spotLabel) === normalizeSpot(q) ||
-        normalizePlate(c.ticket).includes(nq) ||
-        normalizePlate(c.ownerName).includes(nq),
-    );
-  const field = (k: keyof typeof EMPTY, label: string, extra: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
-    <label className="field">
-      <span>{label}</span>
-      <input value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} {...extra} />
-    </label>
-  );
+  const taken = new Set(p.cars.map((c) => c.spotKey));
+  const openSpot = nextOpenSpot(p.spots, taken, p.active?.key);
+  const dupTag = !car && form.ticket.trim() && p.cars.find((c) => c.ticket.trim() === form.ticket.trim());
+  const list = [...p.cars].sort((a, b) => a.parkedAt - b.parkedAt).filter((c) => carMatches(c, q));
+
+  const park = () => {
+    if (!p.active || (!form.ticket.trim() && !form.plate.trim())) {
+      tagRef.current?.focus();
+      return;
+    }
+    p.onPark(p.active, { ...form, ticket: form.ticket.trim(), plate: form.plate.trim().toUpperCase() });
+  };
 
   return (
     <aside className={`inspector live ${p.open ? 'open' : ''}`}>
@@ -60,29 +139,33 @@ export function LivePanel(p: Props) {
 
       {p.moving && (
         <div className="moving">
-          Moving <b>{p.moving.plate}</b>: tap an open spot on the map.
+          <span>
+            Moving <b>#{p.moving.ticket || p.moving.plate}</b>: tap an open spot.
+          </span>
           <button onClick={() => p.onStartMove(null)}>Cancel</button>
         </div>
       )}
 
-      {p.active && car && (
+      {p.active && car && !editing && (
         <section className="card">
           <h2>
             Spot {p.active.label} <span className="pill red">Taken</span>
           </h2>
-          <div className="plate">{car.plate}</div>
+          <div className="car-head">
+            {car.ticket && <div className="tag">#{car.ticket}</div>}
+            <div>
+              <div className="car-title">
+                <ColorDot name={car.color} size={16} /> {carTitle(car)}
+              </div>
+              {car.plate && <div className="plate-sm">{car.plate}</div>}
+            </div>
+          </div>
           <dl>
             <dt>Parked</dt>
             <dd>
               {formatElapsed(p.now - car.parkedAt)} ago ·{' '}
               {new Date(car.parkedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
             </dd>
-            {car.vehicle && (
-              <>
-                <dt>Vehicle</dt>
-                <dd>{car.vehicle}</dd>
-              </>
-            )}
             {car.ownerName && (
               <>
                 <dt>Owner</dt>
@@ -97,12 +180,6 @@ export function LivePanel(p: Props) {
                 </dd>
               </>
             )}
-            {car.ticket && (
-              <>
-                <dt>Ticket</dt>
-                <dd>{car.ticket}</dd>
-              </>
-            )}
             {car.notes && (
               <>
                 <dt>Notes</dt>
@@ -110,51 +187,110 @@ export function LivePanel(p: Props) {
               </>
             )}
           </dl>
+          <button className="primary big" onClick={() => p.onRetrieve(car)}>
+            Car retrieved
+          </button>
           <div className="actions">
-            <button className="primary" onClick={() => p.onRetrieve(car)}>
-              Car retrieved
+            <button onClick={() => p.onStartMove(car)}>Move</button>
+            <button onClick={() => setEditing({ ...EMPTY, ...car })}>
+              {car.plate && car.color && car.ownerName ? 'Edit details' : 'Add details'}
             </button>
-            <button onClick={() => p.onStartMove(car)}>Move to another spot</button>
           </div>
         </section>
       )}
 
-      {p.active && !car && !p.moving && (
+      {p.active && car && editing && (
         <form
           className="card"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!form.plate.trim()) return;
-            p.onPark(p.active!, { ...form, plate: form.plate.trim().toUpperCase() });
+            const { ticket, color, make, plate, vehicle, ownerName, ownerPhone, notes } = editing;
+            p.onUpdate(car, { ticket, color, make, plate: plate.toUpperCase(), vehicle, ownerName, ownerPhone, notes });
+            setEditing(null);
+          }}
+        >
+          <h2>Spot {p.active.label} · details</h2>
+          <label className="field">
+            <span>Tag #</span>
+            <input value={editing.ticket} inputMode="numeric" onChange={(e) => setEditing({ ...editing, ticket: e.target.value })} />
+          </label>
+          <Chips color value={editing} onChange={(v) => setEditing({ ...editing, ...v })} />
+          <Chips value={editing} onChange={(v) => setEditing({ ...editing, ...v })} />
+          <DetailFields form={editing} set={(v) => setEditing({ ...editing, ...v })} />
+          <div className="actions">
+            <button className="primary" type="submit">
+              Save
+            </button>
+            <button type="button" onClick={() => setEditing(null)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {p.active && !car && !p.moving && (
+        <form
+          className="card quick"
+          onSubmit={(e) => {
+            e.preventDefault();
+            park();
           }}
         >
           <h2>
-            Spot {p.active.label} <span className="pill green">Open</span>
+            Park in {p.active.label} <span className="pill green">Open</span>
           </h2>
-          {field('plate', 'License plate *', { required: true, autoFocus: true, autoCapitalize: 'characters' })}
-          {field('vehicle', 'Vehicle', { placeholder: 'Black Tesla Model 3' })}
-          {field('ownerName', 'Owner name')}
-          {field('ownerPhone', 'Owner phone', { type: 'tel', inputMode: 'tel' })}
-          {field('ticket', 'Ticket #')}
-          {field('notes', 'Notes', { placeholder: 'Keys in box 4, scratch on bumper…' })}
-          <button className="primary" type="submit">
-            Park here
+          <label className="field tag-field">
+            <span>Tag #</span>
+            <input
+              ref={tagRef}
+              value={form.ticket}
+              inputMode="numeric"
+              enterKeyHint="go"
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => set({ ticket: e.target.value })}
+              aria-label="Key tag number"
+            />
+          </label>
+          {dupTag && <p className="warn">Tag #{form.ticket} is already parked in {dupTag.spotLabel}.</p>}
+          <Chips color value={form} onChange={set} />
+          <Chips value={form} onChange={set} />
+          {more ? (
+            <DetailFields form={form} set={set} />
+          ) : (
+            <button type="button" className="link more" onClick={() => setMore(true)}>
+              + Plate, owner, notes (optional)
+            </button>
+          )}
+          <button className="primary big" type="submit">
+            Park {form.ticket ? `#${form.ticket}` : ''} in {p.active.label}
           </button>
         </form>
       )}
 
-      {!p.active && !p.moving && <p className="hint">Tap a spot on the map to park a car there or see who's in it.</p>}
+      {!p.active && !p.moving && (
+        <div className="card empty-state">
+          <p>Tap an open spot on the map to park a car.</p>
+          {openSpot && (
+            <button className="primary" onClick={() => p.onFocus(openSpot)}>
+              Next open: {openSpot.label}
+            </button>
+          )}
+        </div>
+      )}
 
       <h3>Parked cars</h3>
-      <input className="search" placeholder="Search plate, spot, ticket, owner" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input className="search" placeholder="Search tag, plate, owner, color" value={q} onChange={(e) => setQ(e.target.value)} />
       <ul className="car-list">
         {list.map((c) => {
           const spot = spotByKey.get(c.spotKey);
           return (
             <li key={c.id}>
-              <button onClick={() => spot && p.onFocus(spot)} disabled={!spot}>
+              <button onClick={() => spot && p.onFocus(spot)} disabled={!spot} className={spot?.key === p.active?.key ? 'on' : ''}>
+                <span className="tag-sm">{c.ticket ? `#${c.ticket}` : '—'}</span>
+                <span className="car-sm">
+                  <ColorDot name={c.color} /> {c.make || c.plate || carTitle(c)}
+                </span>
                 <span className="spot">{spot?.label ?? c.spotLabel}</span>
-                <span className="plate-sm">{c.plate}</span>
                 <span className="time">{formatElapsed(p.now - c.parkedAt)}</span>
               </button>
             </li>

@@ -86,9 +86,14 @@ export interface ParkedCar {
   /** label at the time of parking, shown if the spot is later removed */
   spotLabel: string;
   plate: string;
+  /** car color name, e.g. "Black" (see CAR_COLORS) */
+  color: string;
+  make: string;
+  /** model or anything else about the car */
   vehicle: string;
   ownerName: string;
   ownerPhone: string;
+  /** key tag / ticket number: the one thing a valet must enter at rush */
   ticket: string;
   notes: string;
   parkedAt: number;

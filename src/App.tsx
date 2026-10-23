@@ -8,6 +8,7 @@ import { Palette } from './components/Palette';
 import { exportJson, exportPng, exportSvg, parseMapFile } from './export';
 import { GRID, duplicateSpotLabels, findSpot, listSpots, snap, uid } from './geometry';
 import { canEditMaps, ROLE_INFO, type DataSource, type Role } from './data/source';
+import { carMatches, nextOpenSpot, nextTag } from './ops';
 import { currentMapId, setCurrentMapId } from './storage';
 import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
@@ -33,6 +34,24 @@ function nextRowLetter(items: MapItem[]): string {
 function nextSpaceNumber(items: MapItem[]): string {
   const nums = items.filter((i) => i.kind === 'space').map((i) => parseInt(i.label ?? '', 10)).filter(Number.isFinite);
   return String(nums.length ? Math.max(...nums) + 1 : 1);
+}
+
+const carName = (c: ParkedCar) => (c.ticket ? `#${c.ticket}` : c.plate);
+
+const LAST_TAG_KEY = 'valetate.lastTag.';
+function readLastTag(mapId: string): string {
+  try {
+    return localStorage.getItem(LAST_TAG_KEY + mapId) ?? '';
+  } catch {
+    return '';
+  }
+}
+function writeLastTag(mapId: string, tag: string) {
+  try {
+    localStorage.setItem(LAST_TAG_KEY + mapId, tag);
+  } catch {
+    // not remembered; the suggestion falls back to the parked cars
+  }
 }
 
 function initials(name: string) {
@@ -82,6 +101,11 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   const [activeSpotKey, setActiveSpotKey] = useState<string | null>(null);
   const [moving, setMoving] = useState<ParkedCar | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [lastTag, setLastTagState] = useState<string>(() => readLastTag(init.map.id));
+  const setLastTag = (t: string) => {
+    setLastTagState(t);
+    writeLastTag(map.id, t);
+  };
   const stageRef = useRef<HTMLDivElement>(null);
   const clipboard = useRef<MapItem[]>([]);
   const loadedRef = useRef<LotMap>(init.map);
@@ -121,7 +145,10 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     return () => window.clearTimeout(t);
   }, [state.map]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => setCurrentMapId(map.id), [map.id]);
+  useEffect(() => {
+    setCurrentMapId(map.id);
+    setLastTagState(readLastTag(map.id));
+  }, [map.id]);
 
   const refreshCars = useCallback(async () => {
     try {
@@ -264,15 +291,21 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   };
 
   const find = (q: string) => {
-    const s = findSpot(map.items, q);
+    let s = findSpot(map.items, q);
+    // in the live lot, "104" most often means tag 104, so check cars first
+    const car = mapCars.find((c) => carMatches(c, q) && q.trim());
+    if (car && (mode === 'live' || !s)) s = spots.find((sp) => sp.key === car.spotKey) ?? s;
     if (!s) {
-      flash(`No spot called "${q}"`);
+      flash(`Nothing called "${q}"`);
       return;
     }
     setHighlight(s);
     centerOn(s);
     if (mode === 'edit') dispatch({ type: 'select', ids: [s.itemId] });
-    else setActiveSpotKey(s.key);
+    else {
+      setActiveSpotKey(s.key);
+      setPanel('inspector');
+    }
     window.setTimeout(() => setHighlight((h) => (h === s ? null : h)), 4000);
   };
 
@@ -281,7 +314,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
       if (occupied.has(s.key)) return flash(`Spot ${s.label} is taken`);
       setCars((cs) => cs.map((c) => (c.id === moving.id ? { ...c, spotKey: s.key, spotLabel: s.label } : c)));
       run(source.moveCar(moving.id, s.key, s.label));
-      flash(`${moving.plate} moved to ${s.label}`);
+      flash(`${carName(moving)} moved to ${s.label}`);
       setMoving(null);
       setActiveSpotKey(s.key);
       return;
@@ -411,7 +444,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
         )}
         <details className="menu">
           <summary aria-label="Menu">
-            {account ? <span className="avatar">{initials(account.name || account.email)}</span> : 'Export'}
+            {account ? <span className="avatar">{initials(account.name || account.email)}</span> : <span className="dots">•••</span>}
           </summary>
           <div className="menu-list" onClick={(e) => (e.currentTarget.parentElement as HTMLDetailsElement).removeAttribute('open')}>
             {account && (
@@ -506,6 +539,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             active={activeSpot}
             now={now}
             moving={moving}
+            suggestedTag={nextTag(mapCars, lastTag)}
             open={panel === 'inspector'}
             onClose={() => setPanel('none')}
             onPark={(spot, data) => {
@@ -520,12 +554,23 @@ export default function App({ source, role, account, initialMaps, initialCars }:
               setCars((cs) => [...cs, car]);
               run(source.parkCar(car), () => setCars((cs) => cs.filter((c) => c.id !== car.id)));
               setNow(Date.now());
-              flash(`${car.plate} parked in ${spot.label}`);
+              if (car.ticket) setLastTag(car.ticket);
+              // jump to the next open spot so the next car is one tap away
+              const taken = new Set([...mapCars.map((c) => c.spotKey), spot.key]);
+              const next = nextOpenSpot(spots, taken, spot.key);
+              setActiveSpotKey(next?.key ?? null);
+              flash(`${carName(car)} parked in ${spot.label}${next ? ` · next ${next.label}` : ''}`);
+            }}
+            onUpdate={(car, patch) => {
+              setCars((cs) => cs.map((c) => (c.id === car.id ? { ...c, ...patch } : c)));
+              run(source.updateCar(car.id, patch));
+              if (patch.ticket) setLastTag(patch.ticket);
+              flash('Details saved');
             }}
             onRetrieve={(car) => {
               setCars((cs) => cs.filter((c) => c.id !== car.id));
               run(source.retrieveCar(car.id));
-              flash(`${car.plate} retrieved from ${car.spotLabel}`);
+              flash(`${carName(car)} retrieved from ${car.spotLabel}`);
             }}
             onStartMove={setMoving}
             onFocus={(s) => {
