@@ -18,9 +18,11 @@ import { liveRequests, newGuestToken } from './requests';
 import { GuestLinkDialog } from './components/GuestLink';
 import { PhotoSheet } from './components/PhotoSheet';
 import { createPhotoQueue } from './photoQueue';
-import type { CarRequest, LotEvent, LotMap, MapItem, ParkedCar, Spot } from './types';
+import type { CarRequest, LotEvent, LotMap, MapItem, ParkedCar, Shift, Spot, Tip } from './types';
 import { almostFull, isPre, standPoint } from './surge';
 import { EventDialog, EventPill } from './components/EventMode';
+import { ShiftSheet } from './components/ShiftSheet';
+import { dayStart, duration, money, splitPool } from './shifts';
 
 function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean } {
   const id = currentMapId();
@@ -255,6 +257,33 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   useEffect(() => {
     refreshEvent();
   }, [refreshEvent]);
+
+  // shifts and the tip pool
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [tips, setTips] = useState<Tip[]>([]);
+  const [tipUrl, setTipUrl] = useState('');
+  const [shiftOpen, setShiftOpen] = useState(false);
+  const refreshTeam = useCallback(async () => {
+    const from = dayStart(Date.now());
+    const [s, t, u] = await Promise.all([
+      source.listShifts(from - 24 * 60 * 60 * 1000).catch(() => null),
+      source.listTips(from).catch(() => null),
+      source.getTipUrl().catch(() => null),
+    ]);
+    if (s) setShifts(s);
+    if (t) setTips(t);
+    if (u !== null) setTipUrl(u);
+  }, [source]);
+  useEffect(() => {
+    refreshTeam();
+  }, [refreshTeam]);
+  const myShift = useMemo(() => {
+    const t = Math.max(now, Date.now());
+    const open = shifts.find((s) => s.userId === source.me.id && !s.endedAt);
+    const { total, shares } = splitPool(tips, shifts, dayStart(t), Infinity, t);
+    const mine = shares.find((s) => s.userId === source.me.id)?.cents ?? 0;
+    return { on: !!open, time: open ? `on ${duration(t - open.startedAt)}` : '', pool: open ? money(mine) : money(total) };
+  }, [shifts, tips, now, source]);
   useEffect(() => {
     refreshRequests();
   }, [refreshRequests]);
@@ -347,6 +376,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
         cars: refreshCars,
         requests: refreshRequests,
         event: refreshEvent,
+        team: refreshTeam,
         live: setLive,
         maps: async () => {
           const ms = await source.listMaps().catch(() => null);
@@ -361,7 +391,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
           }
         },
       }),
-    [source, refreshCars, refreshRequests, refreshEvent],
+    [source, refreshCars, refreshRequests, refreshEvent, refreshTeam],
   );
 
   // a phone that slept or lost signal missed changes: catch up as soon as it's back
@@ -816,6 +846,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             {account?.onTeam && <button onClick={account.onTeam}>Team and roles</button>}
             {account?.onSwitchCompany && <button onClick={account.onSwitchCompany}>Switch company</button>}
             {account && <hr />}
+            {mode === 'live' && <button onClick={() => setShiftOpen(true)}>Shift and tips</button>}
             {mode === 'live' && <button onClick={() => setEventDialog(true)}>{event ? 'Event: change let-out time' : 'Start event mode'}</button>}
             <button onClick={() => exportPng(map).catch((e) => flash(e.message))}>Save map as image (PNG)</button>
             <button onClick={() => exportSvg(map)}>Save map as vector (SVG)</button>
@@ -973,6 +1004,8 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             outSince={outSince}
             stand={stand}
             onEditEvent={() => setEventDialog(true)}
+            shift={myShift}
+            onShift={() => setShiftOpen(true)}
             preUntil={event && event.letOutAt > now ? event.letOutAt : undefined}
             onRequestTag={(tag, dueAt) => {
               const t = tag.replace(/^#/, '').trim().toLowerCase();
@@ -1037,6 +1070,44 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             setEventDialog(false);
             run(source.endEvent(event.id)).then(refreshEvent);
             flash('Event ended');
+          }}
+        />
+      )}
+      {shiftOpen && (
+        <ShiftSheet
+          me={source.me}
+          isManager={role !== 'valet'}
+          isAdmin={role === 'admin'}
+          now={now}
+          shifts={shifts}
+          tips={tips}
+          tipUrl={tipUrl}
+          cars={cars}
+          requests={requests}
+          onClose={() => setShiftOpen(false)}
+          onClockIn={(s) => {
+            setShifts((ss) => [...ss, s]);
+            run(source.clockIn(s), () => setShifts((ss) => ss.filter((x) => x.id !== s.id))).then(refreshTeam);
+            flash('Clocked in');
+          }}
+          onClockOut={(s, note) => {
+            setShifts((ss) => ss.map((x) => (x.id === s.id ? { ...x, endedAt: Date.now(), handoffNote: note } : x)));
+            run(source.clockOut(s.id, note)).then(refreshTeam);
+            flash(s.userId === source.me.id ? `Clocked out after ${duration(Date.now() - s.startedAt)}` : `${s.userName || 'Valet'} clocked out`);
+          }}
+          onTip={(t) => {
+            setTips((ts) => [...ts, t]);
+            run(source.addTip(t), () => setTips((ts) => ts.filter((x) => x.id !== t.id))).then(refreshTeam);
+            flash(`${money(t.amountCents)} ${t.method === 'cash' ? 'cash' : 'digital'} tip logged`);
+          }}
+          onVoidTip={(t) => {
+            setTips((ts) => ts.filter((x) => x.id !== t.id));
+            run(source.voidTip(t.id), () => setTips((ts) => [...ts, t])).then(refreshTeam);
+          }}
+          onTipUrl={(u) => {
+            setTipUrl(u);
+            run(source.setTipUrl(u)).then(refreshTeam);
+            flash(u ? 'Tip link saved' : 'Tip link removed');
           }}
         />
       )}

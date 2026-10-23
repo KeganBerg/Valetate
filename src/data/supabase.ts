@@ -458,6 +458,80 @@ export function cloudSource(companyId: string, userId: string, userName: string)
       const n = check(await db().rpc('cars_out_since', { company: companyId, since: new Date(since).toISOString() }));
       return typeof n === 'number' ? n : 0;
     },
+    async listShifts(since) {
+      const rows = check(
+        await db()
+          .from('shifts')
+          .select('*')
+          .eq('company_id', companyId)
+          .or(`ended_at.is.null,ended_at.gte.${new Date(since).toISOString()}`)
+          .order('started_at'),
+      ) as { id: string; user_id: string; user_name: string; started_at: string; ended_at: string | null; handoff_note: string }[];
+      return rows.map((r) => ({
+        id: r.id,
+        userId: r.user_id,
+        userName: r.user_name,
+        startedAt: Date.parse(r.started_at),
+        endedAt: r.ended_at ? Date.parse(r.ended_at) : null,
+        handoffNote: r.handoff_note,
+      }));
+    },
+    async clockIn(s) {
+      const res = await db()
+        .from('shifts')
+        .insert({ id: s.id, company_id: companyId, user_id: userId, user_name: userName, started_at: new Date(s.startedAt).toISOString() });
+      if (res.error?.code === '23505') throw new Error("You're already clocked in");
+      check(res);
+    },
+    async clockOut(id, handoffNote) {
+      check(await db().from('shifts').update({ ended_at: new Date().toISOString(), handoff_note: handoffNote }).eq('id', id).is('ended_at', null));
+    },
+    async listTips(since) {
+      const rows = check(
+        await db()
+          .from('tips')
+          .select('*')
+          .eq('company_id', companyId)
+          .is('voided_at', null)
+          .gte('created_at', new Date(since).toISOString())
+          .order('created_at'),
+      ) as { id: string; amount_cents: number; method: 'cash' | 'digital'; car_id: string | null; logged_by: string; logged_by_name: string; created_at: string }[];
+      return rows.map((r) => ({
+        id: r.id,
+        amountCents: r.amount_cents,
+        method: r.method,
+        carId: r.car_id,
+        loggedBy: r.logged_by,
+        loggedByName: r.logged_by_name,
+        createdAt: Date.parse(r.created_at),
+      }));
+    },
+    async addTip(t) {
+      check(
+        await db()
+          .from('tips')
+          .insert({
+            id: t.id,
+            company_id: companyId,
+            amount_cents: t.amountCents,
+            method: t.method,
+            car_id: t.carId,
+            logged_by: userId,
+            logged_by_name: userName,
+            created_at: new Date(t.createdAt).toISOString(),
+          }),
+      );
+    },
+    async voidTip(id) {
+      check(await db().from('tips').update({ voided_at: new Date().toISOString() }).eq('id', id));
+    },
+    async getTipUrl() {
+      const rows = check(await db().from('companies').select('tip_url').eq('id', companyId)) as { tip_url: string }[];
+      return rows[0]?.tip_url ?? '';
+    },
+    async setTipUrl(url) {
+      check(await db().from('companies').update({ tip_url: url }).eq('id', companyId));
+    },
     async unretrieveCar(car) {
       check(
         await db()
@@ -506,6 +580,8 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'lot_maps', filter: `company_id=eq.${companyId}` }, on.maps)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'requests', filter: `company_id=eq.${companyId}` }, () => on.requests?.())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'lot_events', filter: `company_id=eq.${companyId}` }, () => on.event?.())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts', filter: `company_id=eq.${companyId}` }, () => on.team?.())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tips', filter: `company_id=eq.${companyId}` }, () => on.team?.())
         .subscribe((status) => {
           // changes made while disconnected are not replayed, so reload after every (re)join
           if (status === 'SUBSCRIBED') {
@@ -514,6 +590,7 @@ export function cloudSource(companyId: string, userId: string, userName: string)
             on.maps();
             on.requests?.();
             on.event?.();
+            on.team?.();
           } else on.live?.(false);
         });
       return () => {

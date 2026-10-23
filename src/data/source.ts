@@ -1,4 +1,4 @@
-import type { CarPhoto, CarRequest, LotEvent, LotMap, ParkedCar, PhotoSide } from '../types';
+import type { CarPhoto, CarRequest, LotEvent, LotMap, ParkedCar, PhotoSide, Shift, Tip } from '../types';
 import type { Outbox } from './outbox';
 
 export type CarDetails = Partial<
@@ -66,13 +66,33 @@ export interface DataSource {
   endEvent(id: string): Promise<void>;
   /** cars that left the lot since `since`, for the let-out pace */
   carsOutSince(since: number): Promise<number>;
+  /** shifts that were open at any point since `since` */
+  listShifts(since: number): Promise<Shift[]>;
+  clockIn(shift: Shift): Promise<void>;
+  /** end a shift (mine, or a manager ending someone's) with a note for the next crew */
+  clockOut(id: string, handoffNote: string): Promise<void>;
+  /** tips logged since `since`, voided ones left out */
+  listTips(since: number): Promise<Tip[]>;
+  addTip(tip: Tip): Promise<void>;
+  voidTip(id: string): Promise<void>;
+  /** the guests' digital tip link (Venmo, Cash App…); admins set it */
+  getTipUrl(): Promise<string>;
+  setTipUrl(url: string): Promise<void>;
   /** put a car marked retrieved by mistake back on its spot */
   unretrieveCar(car: ParkedCar): Promise<void>;
   /**
    * called when another device changes maps, cars or requests; `live` reports whether
    * changes are arriving (false while the connection is down)
    */
-  subscribe(on: { maps: () => void; cars: () => void; requests?: () => void; event?: () => void; live?: (live: boolean) => void }): () => void;
+  subscribe(on: {
+    maps: () => void;
+    cars: () => void;
+    requests?: () => void;
+    event?: () => void;
+    /** shifts or tips changed */
+    team?: () => void;
+    live?: (live: boolean) => void;
+  }): () => void;
 }
 
 /** Someone else saved (or deleted) the map since this device last saw it. */

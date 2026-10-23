@@ -9,6 +9,8 @@ interface GuestCar {
   make: string;
   vehicle: string;
   parked: boolean;
+  /** the stand's Venmo / Cash App link, if they set one */
+  tip_url?: string | null;
   request: {
     status: 'open' | 'claimed' | 'ready' | 'done';
     created_at: string;
@@ -128,6 +130,11 @@ export default function GuestPage({ token }: { token: string }) {
                   </p>
                 )}
               </>
+            )}
+            {car.tip_url && /^https:\/\//.test(car.tip_url) && (!car.parked || req?.status === 'ready') && (
+              <a className="guest-tip" href={car.tip_url} target="_blank" rel="noopener noreferrer">
+                Tip your valet
+              </a>
             )}
           </>
         )}

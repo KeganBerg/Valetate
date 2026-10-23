@@ -57,7 +57,8 @@ button.danger {
   color: #ff8a8d;
 }
 
-input {
+input,
+textarea {
   font: inherit;
   color: var(--text);
   background: var(--bg);
@@ -67,7 +68,8 @@ input {
   width: 100%;
   min-width: 0;
 }
-input:focus {
+input:focus,
+textarea:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
@@ -2082,4 +2084,241 @@ button.danger-text {
 }
 .stage.has-pill .conn {
   top: 108px;
+}
+
+/* ---------- shifts and tips ---------- */
+.stats > button.shift-tile {
+  flex: 1;
+  margin: 0;
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.stats > button.shift-tile b {
+  display: block;
+  font-size: 22px;
+  color: var(--accent);
+}
+.stats > button.shift-tile.on {
+  border: 1px solid #34c75966;
+}
+.stats > button.shift-tile.on b {
+  color: #5fe08a;
+}
+@media (max-width: 720px) {
+  .stats > button.shift-tile {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 6px 10px;
+    white-space: nowrap;
+  }
+  .stats > button.shift-tile b {
+    display: inline;
+    font-size: 18px;
+  }
+}
+.shift-sheet {
+  max-width: 460px;
+}
+.handoff-note {
+  margin-top: 14px;
+  background: #4da3ff1a;
+  border: 1px solid #4da3ff55;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.handoff-note p {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+}
+.shift-sheet .clock {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  background: var(--panel-2);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.shift-sheet .clock > div {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+.shift-sheet .clock span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.shift-sheet .clock.on {
+  border-left: 4px solid #34c759;
+}
+.shift-sheet .clock button {
+  margin: 0;
+  min-height: 44px;
+  padding: 0 18px;
+}
+.clock-out {
+  margin-top: 14px;
+}
+.clock-out h3 {
+  margin-top: 0;
+}
+.handoff-summary {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  display: grid;
+  gap: 6px;
+}
+.handoff-summary li {
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.clock-out textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 16px;
+  resize: vertical;
+}
+.tip-log .seg {
+  display: flex;
+  margin-bottom: 8px;
+}
+.tip-log .seg button {
+  flex: 1;
+  margin: 0;
+  min-height: 40px;
+}
+.tip-amounts {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+.tip-amounts button {
+  margin: 0;
+  min-height: 48px;
+  font-size: 17px;
+  font-weight: 700;
+}
+@media (max-width: 420px) {
+  .tip-amounts {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+.tip-custom {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.tip-custom input {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+}
+.tip-custom button {
+  margin: 0;
+  white-space: nowrap;
+}
+.pool h3 {
+  display: flex;
+  align-items: baseline;
+}
+.pool-total {
+  margin-left: auto;
+  font-size: 20px;
+  color: var(--text);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.pool-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 4px;
+}
+.pool-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.pool-list .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.5;
+  flex: none;
+}
+.pool-list .dot.on {
+  background: #34c759;
+  opacity: 1;
+}
+.pool-list .who {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pool-list .mins {
+  color: var(--muted);
+  font-size: 13px;
+}
+.pool-list .cut {
+  min-width: 56px;
+  text-align: right;
+}
+.pool-list button.link,
+.tip-history button.link {
+  margin: 0;
+}
+.tip-history {
+  margin-top: 10px;
+}
+.tip-history summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.tip-history ul {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  display: grid;
+  gap: 2px;
+}
+.tip-history li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 14px;
+}
+.tip-history li button {
+  margin-left: auto !important;
+}
+.tip-link {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+a.guest-tip {
+  display: block;
+  margin-top: 14px;
+  text-align: center;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 17px;
+  text-decoration: none;
 }

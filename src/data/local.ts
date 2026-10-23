@@ -1,6 +1,7 @@
 import { loadCars, saveCars } from '../ops';
 import { loadRequests, saveRequests } from '../requests';
 import { loadEvent, logRetrieval, retrievalsSince, saveEvent } from '../surge';
+import { loadShifts, loadTips, loadTipUrl, saveShifts, saveTips, saveTipUrl } from '../shifts';
 import { localPhotos } from './photoStore';
 import { deleteMap, loadMaps, saveMap } from '../storage';
 import type { DataSource } from './source';
@@ -64,6 +65,18 @@ export const localSource: DataSource = {
   },
   endEvent: async () => saveEvent(null),
   carsOutSince: async (since) => retrievalsSince(since),
+  listShifts: async (since) => loadShifts().filter((s) => !s.endedAt || s.endedAt >= since),
+  clockIn: async (shift) => {
+    if (loadShifts().some((s) => !s.endedAt && s.userId === shift.userId)) throw new Error("You're already clocked in");
+    saveShifts([...loadShifts(), shift]);
+  },
+  clockOut: async (id, handoffNote) =>
+    saveShifts(loadShifts().map((s) => (s.id === id ? { ...s, endedAt: Date.now(), handoffNote } : s))),
+  listTips: async (since) => loadTips().filter((t) => !t.voided && t.createdAt >= since),
+  addTip: async (tip) => saveTips([...loadTips(), tip]),
+  voidTip: async (id) => saveTips(loadTips().map((t) => (t.id === id ? { ...t, voided: true } : t))),
+  getTipUrl: async () => loadTipUrl(),
+  setTipUrl: async (url) => saveTipUrl(url),
   unretrieveCar: async (car) => saveCars([...loadCars().filter((c) => c.id !== car.id), car]),
   listPhotos: (carId) => localPhotos.list(carId),
   addPhoto: ({ id, car, side, blob, takenAt }) =>
@@ -76,6 +89,7 @@ export const localSource: DataSource = {
       if (e.key?.startsWith('valetate.cars')) on.cars();
       if (e.key?.startsWith('valetate.requests')) on.requests?.();
       if (e.key?.startsWith('valetate.event')) on.event?.();
+      if (e.key?.startsWith('valetate.shifts') || e.key?.startsWith('valetate.tips')) on.team?.();
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
