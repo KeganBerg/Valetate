@@ -252,6 +252,7 @@ export const team = {
 // ---------- shared maps and cars ----------
 
 export function cloudSource(companyId: string, userId: string, userName: string): DataSource {
+  let noVersions = false;
   return {
     kind: 'cloud',
     me: { id: userId, name: userName },
@@ -271,6 +272,13 @@ export function cloudSource(companyId: string, userId: string, userName: string)
         updated_at: new Date(m.updatedAt).toISOString(),
         updated_by: userId,
       };
+      const plain = async () => {
+        check(await db().from('lot_maps').upsert({ id: m.id, company_id: companyId, ...row }));
+        return undefined;
+      };
+      // before the map_versions migration: save the old way
+      if (noVersions) return plain();
+      const missing = (e: { message: string } | null) => !!e && /version/.test(e.message) && /does not exist|could not find/i.test(e.message);
       if (baseVersion === undefined) {
         const { data, error } = await db()
           .from('lot_maps')
@@ -278,13 +286,20 @@ export function cloudSource(companyId: string, userId: string, userName: string)
           .select('version')
           .maybeSingle();
         if (!error) return (data as { version: number } | null)?.version;
+        if (missing(error)) {
+          noVersions = true;
+          return plain();
+        }
         // already there: an earlier try got through, or another device made it
         if (!/lot_maps_pkey/.test(error.message)) check({ data, error });
       } else {
         // the server bumps the version; no row back means someone else saved first
-        const saved = check(
-          await db().from('lot_maps').update(row).eq('id', m.id).eq('version', baseVersion).select('version'),
-        ) as { version: number }[];
+        const res = await db().from('lot_maps').update(row).eq('id', m.id).eq('version', baseVersion).select('version');
+        if (missing(res.error)) {
+          noVersions = true;
+          return plain();
+        }
+        const saved = check(res) as { version: number }[];
         if (saved.length) return saved[0].version;
       }
       const theirs = check(await db().from('lot_maps').select('*').eq('id', m.id).maybeSingle()) as MapRow | null;
