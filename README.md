@@ -44,6 +44,10 @@ In the Supabase dashboard, open Authentication → URL Configuration and set **S
 
 "📷 Scan plate" at check-in (and the camera button by the plate field or the parked-car search) opens the rear camera with a plate-shaped box. Frames inside the box are read on the phone with [Tesseract.js](https://github.com/naptha/tesseract.js) until two reads agree, then the plate is shown big and editable before it's used. Nothing leaves the phone. Scanning to search jumps to that car on any map, allowing for lookalike misreads (O/0, B/8, S/5) and one wrong character. Check-in warns when the plate is already parked. The reader's files (about 7 MB: worker, WebAssembly core, English model) are copied from `node_modules` into `public/ocr` by `scripts/copy-ocr.mjs` before `dev` and `build`, so the app serves them itself and needs no CDN; they only download the first time someone scans. Without camera access it falls back to taking a photo, or typing.
 
+### Key tracking
+
+Every car's keys hang on a hook or box: the tag number unless "Key hook or box" says otherwise (check-in warns if that hook already holds another car's keys). The car card shows where the keys are: "On hook 12", or "With Sam · 6m" once someone taps **Take keys**. Claiming a request takes the keys automatically. "Keys out" in the Live lot lists every key off the board, longest first, and turns red after 15 minutes when the car isn't on its way out. Stored in `parked_cars.key_slot`, `keys_with`, `keys_with_name` and `keys_out_at`.
+
 ### Adding automatic texts later (Twilio)
 
 The data is ready for it: requests record a `source` (`staff`, `guest`, `sms`), cars keep `owner_phone` and `guest_token`. The plan is a Supabase Edge Function that sends the welcome text (with the guest link) when a car is parked with a phone number, the "your car is ready" text when a request turns `ready`, and accepts "reply 1 to request" through a Twilio webhook. Setup needed: a Twilio account, a phone number (US: toll-free verification or A2P 10DLC registration, which can take days), and `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` saved as Edge Function secrets.

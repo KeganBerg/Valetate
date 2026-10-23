@@ -79,6 +79,10 @@ interface CarRow {
   notes: string;
   parked_at: string;
   guest_token?: string;
+  key_slot?: string;
+  keys_with?: string | null;
+  keys_with_name?: string;
+  keys_out_at?: string | null;
 }
 
 const toMap = (r: MapRow): LotMap => ({
@@ -106,6 +110,10 @@ const toCar = (r: CarRow): ParkedCar => ({
   notes: r.notes,
   guestToken: r.guest_token,
   parkedAt: Date.parse(r.parked_at),
+  keySlot: r.key_slot ?? '',
+  keysWith: r.keys_with ?? '',
+  keysWithName: r.keys_with_name ?? '',
+  keysOutAt: r.keys_out_at ? Date.parse(r.keys_out_at) : null,
 });
 
 interface RequestRow {
@@ -171,6 +179,7 @@ const DETAIL_COLUMNS: Record<keyof CarDetails, string> = {
   ownerPhone: 'owner_phone',
   ticket: 'ticket',
   notes: 'notes',
+  keySlot: 'key_slot',
 };
 
 function carDetailsRow(patch: CarDetails) {
@@ -302,6 +311,7 @@ export function cloudSource(companyId: string, userId: string, userName: string)
             owner_phone: c.ownerPhone,
             ticket: c.ticket,
             notes: c.notes,
+            key_slot: c.keySlot ?? '',
             ...(c.guestToken ? { guest_token: c.guestToken } : {}),
             parked_at: new Date(c.parkedAt).toISOString(),
             parked_by: userId,
@@ -313,6 +323,18 @@ export function cloudSource(companyId: string, userId: string, userName: string)
     },
     async updateCar(id, patch) {
       check(await db().from('parked_cars').update(carDetailsRow(patch)).eq('id', id));
+    },
+    async setKeys(id, out) {
+      check(
+        await db()
+          .from('parked_cars')
+          .update(
+            out
+              ? { keys_with: userId, keys_with_name: userName, keys_out_at: new Date().toISOString() }
+              : { keys_with: null, keys_with_name: '', keys_out_at: null },
+          )
+          .eq('id', id),
+      );
     },
     async retrieveCar(id) {
       check(

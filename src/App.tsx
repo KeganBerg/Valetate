@@ -9,6 +9,7 @@ import { exportJson, exportPng, exportSvg, parseMapFile } from './export';
 import { GRID, duplicateSpotLabels, findSpot, listSpots, lotAround, snap, uid, unionBounds } from './geometry';
 import { canEditMaps, ROLE_INFO, type DataSource, type Role } from './data/source';
 import { findCar, friendlyError, nextOpenSpot, nextTag } from './ops';
+import { keyHook } from './keys';
 import { currentMapId, setCurrentMapId } from './storage';
 import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
@@ -424,6 +425,16 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     commit(where === 'front' ? [...rest, ...sel] : [...sel, ...rest]);
   };
 
+  const setKeys = (car: ParkedCar, out: boolean) => {
+    const patch = out
+      ? { keysWith: source.me.id, keysWithName: source.me.name, keysOutAt: Date.now() }
+      : { keysWith: '', keysWithName: '', keysOutAt: null };
+    setCars((cs) => cs.map((c) => (c.id === car.id ? { ...c, ...patch } : c)));
+    run(source.setKeys(car.id, out));
+    const hook = keyHook(car);
+    flash(out ? `Keys for ${carName(car)} are with you` : `Keys for ${carName(car)} back ${hook ? `on hook ${hook}` : 'on the board'}`);
+  };
+
   const retrieveCar = (car: ParkedCar) => {
     const putBack = () => setCars((cs) => [...cs.filter((c) => c.id !== car.id), car]);
     const takeOff = () => setCars((cs) => cs.filter((c) => c.id !== car.id));
@@ -805,6 +816,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             }}
             onRetrieve={retrieveCar}
             onFind={find}
+            onKeys={setKeys}
             requests={mapRequests}
             me={source.me.id}
             onRequest={requestCar}
@@ -821,7 +833,15 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             onPhotos={setPhotoCar}
             onClaim={(r) => {
               patchRequest(r.id, { status: 'claimed', claimedBy: source.me.id, claimedByName: source.me.name, claimedAt: Date.now() });
-              run(source.claimRequest(r.id)).then(refreshRequests);
+              // whoever goes for the car takes its keys off the board
+              const car = cars.find((c) => c.id === r.carId);
+              if (car && !car.keysWith)
+                setCars((cs) =>
+                  cs.map((c) => (c.id === car.id ? { ...c, keysWith: source.me.id, keysWithName: source.me.name, keysOutAt: Date.now() } : c)),
+                );
+              run(source.claimRequest(r.id).then(() => (car && !car.keysWith ? source.setKeys(car.id, true) : undefined)))
+                .then(refreshRequests)
+                .then(refreshCars);
             }}
             onUnclaim={(r) => {
               patchRequest(r.id, { status: 'open', claimedBy: '', claimedByName: '', claimedAt: null });

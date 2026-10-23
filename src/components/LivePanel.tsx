@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import type { CarDetails } from '../data/source';
 import { CAR_COLORS, CAR_MAKES, carMatches, colorHex, formatElapsed, nextOpenSpot } from '../ops';
 import type { CarRequest, ParkedCar, Spot } from '../types';
+import { carsWithKeysOut, hookTaken, keyHook, KEYS_LATE_MS } from '../keys';
 import { matchPlate } from '../plates';
 import { PlateScanner } from './PlateScanner';
 import { RequestQueue, RequestStatus, type RequestActions } from './RequestQueue';
 import { SheetHandle } from './SheetHandle';
 
-type NewCar = Omit<ParkedCar, 'id' | 'mapId' | 'spotKey' | 'spotLabel' | 'parkedAt'>;
+type NewCar = Omit<ParkedCar, 'id' | 'mapId' | 'spotKey' | 'spotLabel' | 'parkedAt' | 'keysWith' | 'keysWithName' | 'keysOutAt'>;
 
 interface Props extends RequestActions {
   /** open and claimed requests for this lot */
@@ -34,6 +35,8 @@ interface Props extends RequestActions {
   onPark: (spot: Spot, car: NewCar) => void;
   onUpdate: (car: ParkedCar, patch: CarDetails) => void;
   onRetrieve: (car: ParkedCar) => void;
+  /** keys off the board with me, or back on their hook */
+  onKeys: (car: ParkedCar, out: boolean) => void;
   onStartMove: (car: ParkedCar | null) => void;
   onFocus: (spot: Spot) => void;
   /** jump to a car or spot on any map, as the top search does */
@@ -42,7 +45,7 @@ interface Props extends RequestActions {
   onClose: () => void;
 }
 
-const EMPTY: NewCar = { ticket: '', color: '', make: '', plate: '', vehicle: '', ownerName: '', ownerPhone: '', notes: '' };
+const EMPTY: NewCar = { ticket: '', color: '', make: '', plate: '', vehicle: '', ownerName: '', ownerPhone: '', notes: '', keySlot: '' };
 
 function ColorDot({ name, size = 14 }: { name: string; size?: number }) {
   const hex = colorHex(name);
@@ -105,7 +108,7 @@ function DetailFields({ form, set, onScan }: { form: NewCar; set: (v: Partial<Ne
   const field = (k: keyof NewCar, label: string, extra: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
     <label className="field">
       <span>{label}</span>
-      <input value={form[k]} onChange={(e) => set({ [k]: e.target.value })} {...extra} />
+      <input value={form[k] ?? ''} onChange={(e) => set({ [k]: e.target.value })} {...extra} />
     </label>
   );
   return (
@@ -119,7 +122,10 @@ function DetailFields({ form, set, onScan }: { form: NewCar; set: (v: Partial<Ne
           </button>
         </div>
       </label>
-      {field('vehicle', 'Model', { placeholder: 'Model 3, Camry…' })}
+      <div className="row2">
+        {field('vehicle', 'Model', { placeholder: 'Model 3, Camry…' })}
+        {field('keySlot', 'Key hook or box', { placeholder: form.ticket.trim() ? `Same as tag (${form.ticket.trim()})` : 'Same as tag' })}
+      </div>
       <div className="row2">
         {field('ownerName', 'Owner name')}
         {field('ownerPhone', 'Owner phone', { type: 'tel', inputMode: 'tel' })}
@@ -154,6 +160,9 @@ export function LivePanel(p: Props) {
   const openSpot = nextOpenSpot(p.spots, taken, p.active?.key);
   const dupTag = !car && form.ticket.trim() && p.allCars.find((c) => c.ticket.trim() === form.ticket.trim());
   const dupPlate = !car && form.plate.trim() ? matchPlate(p.allCars, form.plate) : undefined;
+  const dupHook = !car && form.keySlot?.trim() ? hookTaken(p.allCars, form.keySlot) : undefined;
+  const keysOutList = carsWithKeysOut(p.allCars);
+  const liveCarIds = new Set(p.requests.map((r) => r.carId));
   const list = [...p.cars].sort((a, b) => a.parkedAt - b.parkedAt).filter((c) => carMatches(c, q));
 
   const park = () => {
@@ -228,6 +237,24 @@ export function LivePanel(p: Props) {
               {car.plate && <div className="plate-sm">{car.plate}</div>}
             </div>
           </div>
+          <div className={`key-row ${car.keysWith ? 'out' : ''}`}>
+            <span aria-hidden>🔑</span>
+            <span className="key-where">
+              {car.keysWith ? (
+                <>
+                  With <b>{car.keysWith === p.me ? 'you' : car.keysWithName || 'a valet'}</b>
+                  {car.keysOutAt ? ` · ${formatElapsed(p.now - car.keysOutAt)}` : ''}
+                </>
+              ) : keyHook(car) ? (
+                <>
+                  On hook <b>{keyHook(car)}</b>
+                </>
+              ) : (
+                'On the board'
+              )}
+            </span>
+            <button onClick={() => p.onKeys(car, !car.keysWith)}>{car.keysWith ? `Back on ${keyHook(car) ? `hook ${keyHook(car)}` : 'board'}` : 'Take keys'}</button>
+          </div>
           <dl>
             <dt>Parked</dt>
             <dd>
@@ -282,8 +309,8 @@ export function LivePanel(p: Props) {
           className="card"
           onSubmit={(e) => {
             e.preventDefault();
-            const { ticket, color, make, plate, vehicle, ownerName, ownerPhone, notes } = editing;
-            p.onUpdate(car, { ticket, color, make, plate: plate.toUpperCase(), vehicle, ownerName, ownerPhone, notes });
+            const { ticket, color, make, plate, vehicle, ownerName, ownerPhone, notes, keySlot } = editing;
+            p.onUpdate(car, { ticket, color, make, plate: plate.toUpperCase(), vehicle, ownerName, ownerPhone, notes, keySlot: keySlot?.trim() ?? '' });
             setEditing(null);
           }}
         >
@@ -344,6 +371,11 @@ export function LivePanel(p: Props) {
               </button>
             </div>
           )}
+          {dupHook && (
+            <p className="warn">
+              Hook {keyHook(dupHook)} already has the keys for {dupHook.ticket ? `#${dupHook.ticket}` : carTitle(dupHook)} in {dupHook.spotLabel}.
+            </p>
+          )}
           {dupPlate && (
             <p className="warn">
               Plate {dupPlate.plate} is already parked in {dupPlate.spotLabel}
@@ -365,6 +397,32 @@ export function LivePanel(p: Props) {
             </button>
           )}
         </div>
+      )}
+
+      {keysOutList.length > 0 && (
+        <section className="keys-out">
+          <h3>
+            Keys out <span className="pill">{keysOutList.length}</span>
+          </h3>
+          <ul>
+            {keysOutList.map((c) => {
+              const late = !liveCarIds.has(c.id) && p.now - (c.keysOutAt ?? p.now) > KEYS_LATE_MS;
+              return (
+                <li key={c.id} className={late ? 'late' : ''}>
+                  <button className="key-car" onClick={() => p.onFind(c.ticket || c.plate)}>
+                    <span className="tag-sm">{c.ticket ? `#${c.ticket}` : c.plate}</span>
+                    <span className="car-sm">
+                      {c.keysWith === p.me ? 'You' : c.keysWithName || 'A valet'} · {formatElapsed(p.now - (c.keysOutAt ?? p.now))}
+                    </span>
+                  </button>
+                  <button onClick={() => p.onKeys(c, false)} aria-label={`Keys for ${c.ticket ? `#${c.ticket}` : c.plate} are back`}>
+                    {keyHook(c) ? `Hang on ${keyHook(c)}` : 'Hang up'}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
       <h3>Parked cars</h3>
