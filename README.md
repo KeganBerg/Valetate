@@ -19,11 +19,11 @@ All-in-one valet operations app. This first piece is the **lot map editor**, plu
 
 When `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` are set (see `.env`), Valetate requires sign-in, and everything is shared across a company in real time:
 
-- **Admin**: invites people by email, sets roles, removes members, builds maps, parks cars.
+- **Admin**: invites people with one-time links, sets roles, removes members, builds maps, parks cars.
 - **Manager**: builds and edits maps, parks cars.
 - **Valet**: sees the live lot (taken spots, time parked, plate, owner info), parks, moves, and retrieves cars.
 
-The first person to sign up creates the company and becomes its admin. Invited people join automatically the first time they sign in with the invited email. Access is enforced in the database with row-level security (`supabase/migrations/`), not just in the UI. A company always keeps at least one admin, and a spot can only hold one parked car.
+The first person to sign up creates the company and becomes its admin. Admins invite people with a one-time link (or its code, or a QR code) that they text out; whoever opens it and signs in joins with the role on the link. Joining never trusts the email on an account, so Supabase's "Confirm email" setting can be off. Access is enforced in the database with row-level security (`supabase/migrations/`), not just in the UI. A company always keeps at least one admin, and a spot can only hold one parked car.
 
 Without those variables, the app runs in single-device mode and saves to the browser's localStorage.
 
