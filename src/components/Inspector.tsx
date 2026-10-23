@@ -11,6 +11,7 @@ interface Props {
   duplicates: string[];
   onPatch: (id: string, patch: Partial<MapItem>, key: string) => void;
   onMeta: (patch: Partial<LotMap>) => void;
+  onFitLot: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onRotate: (deg: number) => void;
@@ -92,6 +93,13 @@ export function Inspector(p: Props) {
           <NumberField label="Width" value={map.width} min={100} onChange={(v) => p.onMeta({ width: v })} />
           <NumberField label="Height" value={map.height} min={100} onChange={(v) => p.onMeta({ height: v })} />
         </div>
+        <p className="hint lot-hint">
+          <i className="lot-swatch" /> Drag the orange handles on the lot's edges to make it bigger or smaller. It also grows on its own
+          when you drop something past the edge.
+        </p>
+        <button className="fit-lot" onClick={p.onFitLot} disabled={!map.items.length}>
+          Fit lot to objects
+        </button>
         <div className="field">
           <span>Ground</span>
           <div className="surfaces">

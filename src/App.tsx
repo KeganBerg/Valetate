@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ASSETS, type AssetDef } from './assets';
-import { Canvas, type View } from './components/Canvas';
+import { Canvas, MAX_Z, MIN_Z, type View } from './components/Canvas';
 import { Inspector } from './components/Inspector';
 import { LivePanel } from './components/LivePanel';
 import { MapsDialog } from './components/MapsDialog';
 import { Palette } from './components/Palette';
 import { exportJson, exportPng, exportSvg, parseMapFile } from './export';
-import { GRID, duplicateSpotLabels, findSpot, listSpots, snap, uid } from './geometry';
+import { GRID, duplicateSpotLabels, findSpot, listSpots, lotAround, snap, uid, unionBounds } from './geometry';
 import { canEditMaps, ROLE_INFO, type DataSource, type Role } from './data/source';
 import { carMatches, nextOpenSpot, nextTag } from './ops';
 import { currentMapId, setCurrentMapId } from './storage';
@@ -88,7 +88,13 @@ export default function App({ source, role, account, initialMaps, initialCars }:
   const { map, selected } = state;
   const [maps, setMaps] = useState<LotMap[]>(initialMaps);
   const [showMaps, setShowMaps] = useState(init.firstRun && canEdit);
-  const [view, setView] = useState<View>({ x: 40, y: 40, z: 0.6 });
+  const [view, setViewState] = useState<View>({ x: 40, y: 40, z: 0.6 });
+  // until someone pans or zooms, keep the lot fitted as the window changes size
+  const autoFit = useRef(true);
+  const setView = useCallback((v: View | ((v: View) => View)) => {
+    autoFit.current = false;
+    setViewState(v);
+  }, []);
   const [snapOn, setSnapOn] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
   const [mode, setMode] = useState<'edit' | 'live'>(canEdit ? 'edit' : 'live');
@@ -196,16 +202,61 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     return () => window.clearInterval(t);
   }, [mode]);
 
+  const mapNow = useRef(map);
+  mapNow.current = map;
+  /** show the whole lot, plus anything hanging off its edges */
   const fit = useCallback(() => {
     const el = stageRef.current;
     if (!el) return;
     const { width, height } = el.getBoundingClientRect();
-    const z = Math.min(width / map.width, height / map.height) * 0.92;
-    setView({ z, x: (width - map.width * z) / 2, y: (height - map.height * z) / 2 });
-  }, [map.width, map.height]);
+    if (width < 40 || height < 40) return;
+    const m = mapNow.current;
+    const b = unionBounds(m.items);
+    const x0 = Math.min(0, b?.x ?? 0);
+    const y0 = Math.min(0, b?.y ?? 0);
+    const w = Math.max(m.width, b ? b.x + b.w : 0) - x0;
+    const h = Math.max(m.height, b ? b.y + b.h : 0) - y0;
+    // leave room for the floating buttons on phones
+    const pad = width <= 820 ? 24 : 48;
+    const z = Math.min(MAX_Z, Math.max(MIN_Z, Math.min((width - pad * 2) / w, (height - pad * 2) / h)));
+    autoFit.current = true;
+    setViewState({ z, x: (width - w * z) / 2 - x0 * z, y: (height - h * z) / 2 - y0 * z });
+  }, []);
 
-  // fit whenever a different map is opened
+  // fit whenever a different map is opened…
   useLayoutEffect(fit, [map.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // …and when the screen changes size, unless the view was moved by hand
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => autoFit.current && fit());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fit]);
+
+  const zoomBy = (f: number) => {
+    const r = stageRef.current!.getBoundingClientRect();
+    setView((v) => {
+      const z = Math.min(MAX_Z, Math.max(MIN_Z, v.z * f));
+      const cx = r.width / 2;
+      const cy = r.height / 2;
+      return { z, x: cx - ((cx - v.x) / v.z) * z, y: cy - ((cy - v.y) / v.z) * z };
+    });
+  };
+
+  /** resize the lot (and shift objects when it grows up or left) without the picture jumping */
+  const applyLot = (g: { items: MapItem[]; width: number; height: number; dx: number; dy: number }, opts: { key?: string; select?: string[] } = {}) => {
+    dispatch({ type: 'commit', items: g.items, size: { width: g.width, height: g.height }, ...opts });
+    if (g.dx || g.dy) setView((v) => ({ ...v, x: v.x - g.dx * v.z, y: v.y - g.dy * v.z }));
+  };
+
+  const fitLotToObjects = () => {
+    const g = lotAround(map.items, map.width, map.height, { shrink: true });
+    if (!g) return flash('The lot already fits everything on it');
+    applyLot(g);
+    requestAnimationFrame(fit);
+    flash(`Lot is now ${g.width} × ${g.height}`);
+  };
 
   const load = (m: LotMap, persist: boolean) => {
     loadedRef.current = persist ? (null as unknown as LotMap) : m;
@@ -220,8 +271,12 @@ export default function App({ source, role, account, initialMaps, initialCars }:
     }
   };
 
-  const commit = (items: MapItem[], opts: { key?: string; select?: string[] } = {}) =>
-    dispatch({ type: 'commit', items, ...opts });
+  // the lot grows to hold anything added or moved past its edge
+  const commit = (items: MapItem[], opts: { key?: string; select?: string[] } = {}) => {
+    const grown = lotAround(items, map.width, map.height);
+    if (grown) applyLot(grown, opts);
+    else dispatch({ type: 'commit', items, ...opts });
+  };
 
   const addAsset = (a: AssetDef, at?: { x: number; y: number }) => {
     let p = at;
@@ -495,13 +550,13 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             onSpotClick={onSpotClick}
           />
           <div className="zoom">
-            <button onClick={() => setView((v) => ({ ...v, z: Math.max(0.1, v.z / 1.25) }))} aria-label="Zoom out">
+            <button onClick={() => zoomBy(1 / 1.25)} aria-label="Zoom out">
               −
             </button>
             <button onClick={fit} title="Fit map to screen">
               {Math.round(view.z * 100)}%
             </button>
-            <button onClick={() => setView((v) => ({ ...v, z: Math.min(6, v.z * 1.25) }))} aria-label="Zoom in">
+            <button onClick={() => zoomBy(1.25)} aria-label="Zoom in">
               +
             </button>
           </div>
@@ -525,6 +580,7 @@ export default function App({ source, role, account, initialMaps, initialCars }:
             duplicates={duplicates}
             onPatch={(id, patch, key) => commit(map.items.map((i) => (i.id === id ? { ...i, ...patch } : i)), { key })}
             onMeta={(patch) => dispatch({ type: 'meta', patch })}
+            onFitLot={fitLotToObjects}
             onDuplicate={duplicate}
             onDelete={remove}
             onRotate={rotate}

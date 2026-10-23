@@ -163,3 +163,50 @@ export function spotAt(items: MapItem[], wx: number, wy: number): Spot | undefin
   }
   return undefined;
 }
+
+export const LOT_MIN = 100;
+export const LOT_PAD = GRID * 4;
+
+/**
+ * Make the lot cover every object. With `shrink`, the lot is also trimmed
+ * to the objects (plus a margin). Objects past the top/left edge are moved
+ * so the lot keeps starting at 0,0; (dx, dy) is how far everything moved.
+ * Returns null when nothing needs to change.
+ */
+export function lotAround(
+  items: MapItem[],
+  width: number,
+  height: number,
+  { pad = LOT_PAD, shrink = false } = {},
+): { items: MapItem[]; width: number; height: number; dx: number; dy: number } | null {
+  const b = unionBounds(items);
+  if (!b) return null;
+  const up = (v: number) => Math.ceil(v / GRID) * GRID;
+  let left = 0;
+  let top = 0;
+  let right = width;
+  let bottom = height;
+  if (shrink) {
+    left = Math.floor((b.x - pad) / GRID) * GRID;
+    top = Math.floor((b.y - pad) / GRID) * GRID;
+    right = up(b.x + b.w + pad);
+    bottom = up(b.y + b.h + pad);
+  } else {
+    if (b.x < 0) left = -up(-b.x + pad);
+    if (b.y < 0) top = -up(-b.y + pad);
+    if (b.x + b.w > width) right = up(b.x + b.w + pad);
+    if (b.y + b.h > height) bottom = up(b.y + b.h + pad);
+  }
+  const w = Math.max(LOT_MIN, right - left);
+  const h = Math.max(LOT_MIN, bottom - top);
+  if (!left && !top && w === width && h === height) return null;
+  const dx = left ? -left : 0;
+  const dy = top ? -top : 0;
+  return {
+    items: dx || dy ? items.map((it) => ({ ...it, x: it.x + dx, y: it.y + dy })) : items,
+    width: w,
+    height: h,
+    dx,
+    dy,
+  };
+}

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type Dispatch } from 'react';
-import { GRID, center, itemBounds, listSpots, normalizeAngle, rotatePt, snap, spotAt, toLocal } from '../geometry';
+import { GRID, LOT_MIN, center, itemBounds, listSpots, lotAround, normalizeAngle, rotatePt, snap, spotAt, toLocal } from '../geometry';
 import { isLight } from '../assets';
 import { colorHex, formatElapsed } from '../ops';
-import type { Action } from '../store';
+import type { Action, Snapshot } from '../store';
 import type { LotMap, MapItem, ParkedCar, Spot } from '../types';
 import { FONT, MapItems } from './MapSvg';
 
@@ -12,8 +12,8 @@ export interface View {
   z: number;
 }
 
-const MIN_Z = 0.1;
-const MAX_Z = 6;
+export const MIN_Z = 0.05;
+export const MAX_Z = 6;
 const MIN_SIZE = 6;
 
 type Drag =
@@ -22,7 +22,31 @@ type Drag =
   | { mode: 'resize'; id: string; cx: -1 | 0 | 1; cy: -1 | 0 | 1; snapshot: MapItem[]; orig: MapItem }
   | { mode: 'rotate'; id: string; snapshot: MapItem[]; orig: MapItem }
   | { mode: 'marquee'; wx: number; wy: number; cur: { x: number; y: number }; additive: string[] }
-  | { mode: 'pinch'; d0: number; z0: number; world: { x: number; y: number } };
+  | { mode: 'pinch'; d0: number; z0: number; world: { x: number; y: number } }
+  /** dragging an edge or corner of the lot itself */
+  | { mode: 'lot'; sx: -1 | 0 | 1; sy: -1 | 0 | 1; snapshot: Snapshot; view: View };
+
+type Side = -1 | 0 | 1;
+const LOT_HANDLES: [Side, Side][] = [
+  [-1, -1],
+  [0, -1],
+  [1, -1],
+  [1, 0],
+  [1, 1],
+  [0, 1],
+  [-1, 1],
+  [-1, 0],
+];
+const LOT_CURSOR: Record<string, string> = {
+  '-1,-1': 'nwse-resize',
+  '1,1': 'nwse-resize',
+  '1,-1': 'nesw-resize',
+  '-1,1': 'nesw-resize',
+  '0,-1': 'ns-resize',
+  '0,1': 'ns-resize',
+  '-1,0': 'ew-resize',
+  '1,0': 'ew-resize',
+};
 
 interface Props {
   map: LotMap;
@@ -65,7 +89,9 @@ export function Canvas({
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const tapSpot = useRef<Spot | null | undefined>(undefined);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [lotDrag, setLotDrag] = useState(false);
   const items = map.items;
+  const snapshotNow = (): Snapshot => ({ items, width: map.width, height: map.height });
 
   const screen = (e: { clientX: number; clientY: number }) => {
     const r = svgRef.current!.getBoundingClientRect();
@@ -102,6 +128,10 @@ export function Canvas({
     if (d && (d.mode === 'move' || d.mode === 'resize' || d.mode === 'rotate')) {
       dispatch({ type: 'preview', items: d.snapshot });
     }
+    if (d?.mode === 'lot') {
+      dispatch({ type: 'preview', items: d.snapshot.items, size: d.snapshot });
+      setLotDrag(false);
+    }
     setMarquee(null);
     drag.current = { mode: 'pinch', d0, z0: view.z, world: toWorldPt(mid.x, mid.y) };
   };
@@ -131,6 +161,13 @@ export function Canvas({
         const [cx, cy] = handle.split(',').map(Number) as [-1 | 0 | 1, -1 | 0 | 1];
         drag.current = { mode: 'resize', id: orig.id, cx, cy, snapshot: items, orig };
       }
+      return;
+    }
+    const lot = target.closest('[data-lot]')?.getAttribute('data-lot');
+    if (lot) {
+      const [sx, sy] = lot.split(',').map(Number) as [Side, Side];
+      drag.current = { mode: 'lot', sx, sy, snapshot: snapshotNow(), view };
+      setLotDrag(true);
       return;
     }
 
@@ -176,6 +213,36 @@ export function Canvas({
     if (d.mode === 'pan') {
       if (Math.hypot(p.x - d.sx, p.y - d.sy) > 6) tapSpot.current = undefined;
       setView({ ...d.view, x: d.view.x + p.x - d.sx, y: d.view.y + p.y - d.sy });
+      return;
+    }
+
+    if (d.mode === 'lot') {
+      // work in the coordinates the drag started in, since the view shifts as the lot grows up/left
+      const o = d.snapshot;
+      const w0 = toWorldPt(p.x, p.y, d.view);
+      const useSnap = !e.altKey;
+      let width = o.width;
+      let height = o.height;
+      let dx = 0;
+      let dy = 0;
+      if (d.sx === 1) width = Math.max(LOT_MIN, snap(w0.x, useSnap));
+      if (d.sy === 1) height = Math.max(LOT_MIN, snap(w0.y, useSnap));
+      if (d.sx === -1) {
+        const left = Math.min(o.width - LOT_MIN, snap(w0.x, useSnap));
+        width = o.width - left;
+        dx = -left;
+      }
+      if (d.sy === -1) {
+        const top = Math.min(o.height - LOT_MIN, snap(w0.y, useSnap));
+        height = o.height - top;
+        dy = -top;
+      }
+      dispatch({
+        type: 'preview',
+        items: dx || dy ? o.items.map((it) => ({ ...it, x: it.x + dx, y: it.y + dy })) : o.items,
+        size: { width, height },
+      });
+      setView({ ...d.view, x: d.view.x - dx * d.view.z, y: d.view.y - dy * d.view.z });
       return;
     }
 
@@ -240,8 +307,19 @@ export function Canvas({
       tapSpot.current = undefined;
       return;
     }
-    if ((d.mode === 'move' && d.moved) || d.mode === 'resize' || d.mode === 'rotate') {
-      if (d.snapshot !== items) dispatch({ type: 'pushHistory', snapshot: d.snapshot });
+    if (d.mode === 'lot') {
+      setLotDrag(false);
+      if (map.width !== d.snapshot.width || map.height !== d.snapshot.height) dispatch({ type: 'pushHistory', snapshot: d.snapshot });
+    } else if ((d.mode === 'move' && d.moved) || d.mode === 'resize' || d.mode === 'rotate') {
+      if (d.snapshot !== items) {
+        // the lot grows to keep whatever was dragged past its edge
+        const grown = lotAround(items, map.width, map.height);
+        if (grown) {
+          dispatch({ type: 'preview', items: grown.items, size: grown });
+          setView((v) => ({ ...v, x: v.x - grown.dx * v.z, y: v.y - grown.dy * v.z }));
+        }
+        dispatch({ type: 'pushHistory', snapshot: { items: d.snapshot, width: map.width, height: map.height } });
+      }
     } else if (d.mode === 'marquee') {
       const m = { x: Math.min(d.wx, d.cur.x), y: Math.min(d.wy, d.cur.y), r: Math.max(d.wx, d.cur.x), b: Math.max(d.wy, d.cur.y) };
       const hit = items
@@ -306,6 +384,59 @@ export function Canvas({
         <rect width={map.width} height={map.height} fill={map.surface} />
         {showGrid && <rect width={map.width} height={map.height} fill="url(#grid-major)" pointerEvents="none" />}
         <MapItems items={items} />
+
+        {mode === 'edit' && (
+          <g className="lot-frame">
+            <rect
+              width={map.width}
+              height={map.height}
+              fill="none"
+              stroke="#ffb020"
+              strokeOpacity={lotDrag ? 0.9 : 0.35}
+              strokeWidth={stroke * (lotDrag ? 2 : 1)}
+              strokeDasharray={lotDrag ? undefined : `${8 / view.z} ${6 / view.z}`}
+              pointerEvents="none"
+            />
+            {LOT_HANDLES.map(([sx, sy]) => {
+              const k = `${sx},${sy}`;
+              // sit just outside the lot so they don't cover objects along its edge
+              const x = ((sx + 1) / 2) * map.width + (sx * 10) / view.z;
+              const y = ((sy + 1) / 2) * map.height + (sy * 10) / view.z;
+              const corner = sx !== 0 && sy !== 0;
+              const len = 34 / view.z;
+              const thick = 9 / view.z;
+              return (
+                <g key={k} data-lot={k} className="lot-handle" style={{ cursor: LOT_CURSOR[k] }}>
+                  <title>Drag to resize the lot</title>
+                  {/* a big invisible target so fingers can grab it */}
+                  <circle cx={x} cy={y} r={22 / view.z} fill="transparent" />
+                  {corner ? (
+                    <circle cx={x} cy={y} r={7 / view.z} fill="#ffb020" stroke="#0b0d10" strokeWidth={stroke * 1.5} />
+                  ) : (
+                    <rect
+                      x={x - (sx ? thick : len) / 2}
+                      y={y - (sy ? thick : len) / 2}
+                      width={sx ? thick : len}
+                      height={sy ? thick : len}
+                      rx={thick / 2}
+                      fill="#ffb020"
+                      stroke="#0b0d10"
+                      strokeWidth={stroke * 1.5}
+                    />
+                  )}
+                </g>
+              );
+            })}
+            {lotDrag && (
+              <g transform={`translate(${map.width / 2} ${map.height / 2}) scale(${1 / view.z})`} pointerEvents="none">
+                <rect x={-62} y={-17} width={124} height={34} rx={17} fill="#0b0d10" fillOpacity={0.85} />
+                <text textAnchor="middle" y={6} fontSize={16} fontWeight={700} fill="#fff">
+                  {Math.round(map.width)} × {Math.round(map.height)}
+                </text>
+              </g>
+            )}
+          </g>
+        )}
 
         {sel.map((it) => {
           const c = center(it);

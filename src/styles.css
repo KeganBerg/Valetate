@@ -955,3 +955,28 @@ button.more {
   letter-spacing: 1px;
   font-weight: 800;
 }
+
+/* lot resizing */
+.lot-handle {
+  touch-action: none;
+}
+.lot-handle:hover circle:last-child,
+.lot-handle:hover rect {
+  fill: #ffc65a;
+}
+.lot-hint {
+  margin: 2px 0 8px;
+}
+.lot-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 7px;
+  border-radius: 4px;
+  background: #ffb020;
+  vertical-align: middle;
+  margin-right: 2px;
+}
+button.fit-lot {
+  width: 100%;
+  margin-bottom: 12px;
+}
