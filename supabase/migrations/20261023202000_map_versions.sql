@@ -16,7 +16,6 @@ end;
 $$;
 revoke execute on function public.bump_map_version() from anon, authenticated, public;
 
-drop trigger if exists lot_maps_bump_version on public.lot_maps;
-create trigger lot_maps_bump_version
+create or replace trigger lot_maps_bump_version
   before update on public.lot_maps
   for each row execute function public.bump_map_version();
