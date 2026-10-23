@@ -127,6 +127,16 @@ export interface CarRequest {
   claimedByName: string;
   claimedAt: number | null;
   readyAt: number | null;
+  /** a pre-request: bring it up at this time (an event's let-out), not now */
+  dueAt?: number | null;
+}
+
+/** A show or game letting out at a known time: the whole crew counts down to it. */
+export interface LotEvent {
+  id: string;
+  name: string;
+  letOutAt: number;
+  createdAt: number;
 }
 
 export type PhotoSide = 'front' | 'driver' | 'back' | 'passenger' | 'closeup';

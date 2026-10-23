@@ -23,6 +23,13 @@ describe('request queue', () => {
     expect(q.map((r) => r.id)).toEqual(['a', 'b', 'c', 'r']);
   });
 
+  it('puts cars asked for ahead of a let-out last until they are due', () => {
+    const pre = { ...req('p', 'open', 0), dueAt: 1000 };
+    const q = sortQueue([pre, req('r', 'ready', 5), req('a', 'open', 9)], 500);
+    expect(q.map((r) => r.id)).toEqual(['a', 'r', 'p']);
+    expect(sortQueue([pre, req('a', 'open', 9)], 2000).map((r) => r.id)).toEqual(['p', 'a']);
+  });
+
   it('drops requests for cars that are no longer parked', () => {
     expect(liveRequests([req('a', 'open', 1, 'car1'), req('b', 'open', 1, 'gone')], new Set(['car1'])).map((r) => r.id)).toEqual(['a']);
   });
