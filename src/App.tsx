@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ASSETS, type AssetDef } from './assets';
 import { Canvas, MAX_Z, MIN_Z, type View } from './components/Canvas';
-import { Inspector } from './components/Inspector';
+import { Inspector, Stepper } from './components/Inspector';
+import { Guide } from './components/Guide';
 import { AlignBar } from './components/Satellite';
-import { ATTRIBUTION } from './backdrop';
+import { ATTRIBUTION, placeBackdrop } from './backdrop';
 import { MapsDialog } from './components/MapsDialog';
 import { Palette } from './components/Palette';
 import { exportJson, exportPng, exportSvg, parseMapFile } from './export';
@@ -38,6 +39,13 @@ function nextRowLetter(items: MapItem[]): string {
 function nextSpaceNumber(items: MapItem[]): string {
   const nums = items.filter((i) => i.kind === 'space').map((i) => parseInt(i.label ?? '', 10)).filter(Number.isFinite);
   return String(nums.length ? Math.max(...nums) + 1 : 1);
+}
+
+function itemTitle(it: MapItem | undefined) {
+  if (!it) return 'Item';
+  if (it.kind === 'space' && it.accessible) return 'Accessible space';
+  if (it.kind === 'spaceRow') return it.prefix?.trim() ? `Row ${it.prefix.trim()}` : 'Row of spaces';
+  return ASSETS.find((a) => a.kind === it.kind)?.name ?? 'Item';
 }
 
 function initials(name: string) {
@@ -89,6 +97,8 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
   const [saving, setSaving] = useState<'saved' | 'saving' | 'error'>('saved');
   const [panel, setPanel] = useState<'none' | 'palette' | 'inspector'>('none');
   const [alignOn, setAlignOn] = useState(false);
+  // the step-by-step guide for drawing a first lot
+  const [guideOn, setGuideOn] = useState(false);
   // on a phone the panels are sheets over the map: back closes them
   const [phone, setPhone] = useState(() => matchMedia('(max-width: 820px)').matches);
   useEffect(() => {
@@ -332,9 +342,30 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
     if (a.kind === 'space' && !a.defaults?.accessible) it.label = nextSpaceNumber(map.items);
     commit([...map.items, it], { select: [it.id] });
     setPanel('none');
+    // zoomed far out (a phone showing the whole lot), a new row is a speck: zoom in so it can be grabbed
+    if (!at) {
+      const r = stageRef.current!.getBoundingClientRect();
+      // a comfortable working size: the row fills most of the width, small things show life-size
+      const want = Math.min(1, (r.width * 0.6) / Math.max(it.w, it.h));
+      if (Math.max(it.w, it.h) * view.z < 160 && want > view.z) {
+        const cx = it.x + it.w / 2;
+        const cy = it.y + it.h / 2;
+        setView({ z: want, x: r.width / 2 - cx * want, y: r.height / 2 - cy * want });
+      }
+    }
   };
 
   const selItems = map.items.filter((i) => selected.includes(i.id));
+  const rowAsset = ASSETS.find((a) => a.kind === 'spaceRow')!;
+
+  /** open the step-by-step guide, on a fresh blank lot or on the map that's open */
+  const startGuide = (fresh: boolean) => {
+    if (fresh) load(instantiate(TEMPLATES.find((t) => t.key === 'blank') ?? TEMPLATES[0]), true);
+    setShowMaps(false);
+    dispatch({ type: 'select', ids: [] });
+    setPanel('none');
+    setGuideOn(true);
+  };
 
   const duplicate = () => {
     if (!selItems.length) return;
@@ -350,10 +381,18 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
 
   const remove = () => {
     if (!selected.length) return;
+    const what = selected.length === 1 ? itemTitle(selItems[0]).toLowerCase() : `${selected.length} things`;
     commit(
       map.items.filter((i) => !selected.includes(i.id)),
       { select: [] },
     );
+    // deleting is the scariest tap: say what went and offer it back right there
+    flash(`Deleted ${what}`, () => dispatch({ type: 'undo' }), 'Undo');
+  };
+
+  const deselect = () => {
+    dispatch({ type: 'select', ids: [] });
+    setPanel('none');
   };
 
   const rotate = (deg: number) =>
@@ -446,6 +485,21 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
     }
   };
 
+  // one short line on what to do next, in plain words
+  const single = selItems.length === 1 ? selItems[0] : null;
+  const canvasHint =
+    !canEdit || aligning || guideOn
+      ? null
+      : selItems.length
+        ? phone
+          ? 'Drag it to move it. Drag a white square to stretch it.'
+          : 'Drag it to move it. Drag a white square to stretch it, or the round dot to turn it.'
+        : map.items.length === 0
+          ? phone
+            ? 'Tap ＋ Add at the bottom to put things on your lot.'
+            : 'Click a picture on the left (or drag it onto the lot) to add it.'
+          : null;
+
   const findForm = (
     <form
       className="find"
@@ -478,23 +532,17 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
         <div className="grow" />
         {canEdit && (
           <div className="tools">
-            <button className="history" onClick={() => dispatch({ type: 'undo' })} disabled={!state.past.length} title="Undo (Ctrl+Z)" aria-label="Undo">
-              ↶
+            <button className="history" onClick={() => dispatch({ type: 'undo' })} disabled={!state.past.length} title="Undo your last change (Ctrl+Z)">
+              <span aria-hidden>↶</span> Undo
             </button>
-            <button className="history" onClick={() => dispatch({ type: 'redo' })} disabled={!state.future.length} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
-              ↷
-            </button>
-            <button className={showGrid ? 'on' : ''} onClick={() => setShowGrid(!showGrid)} title="Show grid">
-              Grid
-            </button>
-            <button className={snapOn ? 'on' : ''} onClick={() => setSnapOn(!snapOn)} title="Snap to grid (hold Alt to override)">
-              Snap
+            <button className="history redo" onClick={() => dispatch({ type: 'redo' })} disabled={!state.future.length} title="Put back what you undid (Ctrl+Shift+Z)">
+              <span aria-hidden>↷</span> Redo
             </button>
           </div>
         )}
         {canEdit && (
           <span className={`save-state ${saving}`} title={source.kind === 'cloud' ? 'Saved for your whole team' : 'Saved on this device'}>
-            {saving === 'saving' ? 'Saving…' : saving === 'error' ? 'Not saved' : 'Saved'}
+            {saving === 'saving' ? 'Saving…' : saving === 'error' ? 'Not saved' : '✓ Saved'}
           </span>
         )}
         <details className="menu">
@@ -514,7 +562,8 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
             {account?.onTeam && <button onClick={account.onTeam}>Team and roles</button>}
             {account?.onSwitchCompany && <button onClick={account.onSwitchCompany}>Switch company</button>}
             {account && <hr />}
-            <button onClick={() => setShowMaps(true)}>{canEdit ? 'Maps and templates' : 'All maps'}</button>
+            <button onClick={() => setShowMaps(true)}>{canEdit ? 'My maps and starting points' : 'All maps'}</button>
+            {canEdit && <button onClick={() => startGuide(false)}>Show me how (step by step)</button>}
             <button onClick={() => exportPng(map).catch((e) => flash(e.message))}>Save map as image (PNG)</button>
             <button onClick={() => exportSvg(map)}>Save map as vector (SVG)</button>
             <button onClick={() => exportJson(map)}>Export map file</button>
@@ -552,27 +601,86 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
           )}
           {map.backdrop && !map.backdrop.hidden && <div className="sat-credit">{ATTRIBUTION}</div>}
           <div className="zoom">
-            <button onClick={() => zoomBy(1 / 1.25)} aria-label="Zoom out">
+            <button className="zoom-step" onClick={() => zoomBy(1 / 1.25)} aria-label="Zoom out">
               −
             </button>
-            <button className="zoom-fit" onClick={fit} title="Fit map to screen">
-              {Math.round(view.z * 100)}%
+            <button className="zoom-fit" onClick={fit} title={`Show the whole lot (now ${Math.round(view.z * 100)}%)`}>
+              Show all
             </button>
-            <button onClick={() => zoomBy(1.25)} aria-label="Zoom in">
+            <button className="zoom-step" onClick={() => zoomBy(1.25)} aria-label="Zoom in">
               +
             </button>
           </div>
-          {canEdit && (
+          {canvasHint && !toast && (
+            <div className="canvas-hint" role="note">
+              {canvasHint}
+            </div>
+          )}
+          {canEdit && !selItems.length && !aligning && (
             <div className="mobile-tabs">
-              <button className={panel === 'palette' ? 'on' : ''} onClick={() => setPanel(panel === 'palette' ? 'none' : 'palette')}>
+              <button
+                className={`add-tab ${panel === 'palette' ? 'on' : ''}`}
+                onClick={() => setPanel(panel === 'palette' ? 'none' : 'palette')}
+              >
                 ＋ Add
               </button>
               <button className={panel === 'inspector' ? 'on' : ''} onClick={() => setPanel(panel === 'inspector' ? 'none' : 'inspector')}>
-                Properties
+                Lot and photo
               </button>
             </div>
           )}
-          {role === 'admin' && account && setupKey && !setupHidden && (
+          {canEdit && phone && selItems.length > 0 && panel !== 'inspector' && !aligning && (
+            <div className="select-bar" role="toolbar" aria-label="Change what you picked">
+              <div className="sb-head">
+                <b>{single ? itemTitle(single) : `${selItems.length} things picked`}</b>
+                <button className="primary" onClick={deselect}>
+                  ✓ Done
+                </button>
+              </div>
+              {single?.kind === 'spaceRow' && (
+                <Stepper
+                  label="Number of spaces"
+                  unit="space"
+                  value={single.count ?? 1}
+                  onChange={(count) => {
+                    const cw = single.w / (single.count ?? 1);
+                    commit(
+                      map.items.map((i) => (i.id === single.id ? { ...i, count, w: cw * count } : i)),
+                      { key: `${single.id}:count` },
+                    );
+                  }}
+                />
+              )}
+              <div className="big-actions four">
+                <button onClick={() => rotate(90)}>
+                  <i aria-hidden>↻</i>Turn
+                </button>
+                <button onClick={duplicate}>
+                  <i aria-hidden>⧉</i>Copy
+                </button>
+                <button className="danger" onClick={remove}>
+                  <i aria-hidden>🗑</i>Delete
+                </button>
+                <button onClick={() => setPanel('inspector')}>
+                  <i aria-hidden>⋯</i>More
+                </button>
+              </div>
+            </div>
+          )}
+          {guideOn && canEdit && !aligning && (
+            <Guide
+              map={map}
+              onPlace={(p) => {
+                const b = map.backdrop;
+                const next = placeBackdrop(p.lat, p.lng, map, p.name);
+                dispatch({ type: 'meta', patch: { backdrop: b ? { ...next, scale: b.scale, rotation: b.rotation, opacity: b.opacity } : next } });
+                setAlignOn(true);
+              }}
+              onAddRow={() => addAsset(rowAsset)}
+              onClose={() => setGuideOn(false)}
+            />
+          )}
+          {role === 'admin' && account && setupKey && !setupHidden && !guideOn && (
             <GettingStarted
               company={account.companyName}
               onHide={hideSetup}
@@ -635,6 +743,11 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
               setPanel('none');
               dispatch({ type: 'select', ids: [] });
             }}
+            onDone={deselect}
+            showGrid={showGrid}
+            onShowGrid={setShowGrid}
+            snapOn={snapOn}
+            onSnap={setSnapOn}
           />
         )}
       </main>
@@ -644,7 +757,8 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
           maps={maps}
           currentId={map.id}
           onOpen={(m) => load(m, false)}
-          onTemplate={(t: Template) => load(instantiate(t), true)}
+          onTemplate={(t: Template) => (t.key === 'blank' ? startGuide(true) : load(instantiate(t), true))}
+          onGuide={() => startGuide(true)}
           canEdit={canEdit}
           onDelete={(m) => {
             source.deleteMap(m.id).catch((e) => flash(friendlyError(e)));

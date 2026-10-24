@@ -86,6 +86,7 @@ export function Canvas({
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [lotDrag, setLotDrag] = useState(false);
+  const [coarse] = useState(() => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
   const items = map.items;
   const snapshotNow = (): Snapshot => ({ items, width: map.width, height: map.height, backdrop: map.backdrop });
 
@@ -342,7 +343,9 @@ export function Canvas({
 
   const sel = readOnly ? [] : items.filter((it) => selected.includes(it.id));
   const single = sel.length === 1 ? sel[0] : null;
-  const hs = 10 / view.z;
+  // fingers need bigger handles than a mouse
+  const hs = (coarse ? 16 : 10) / view.z;
+  const stalk = (coarse ? 40 : 28) / view.z;
   const stroke = 1.5 / view.z;
 
   return (
@@ -462,12 +465,12 @@ export function Canvas({
 
         {single && (
           <g transform={`translate(${center(single).x} ${center(single).y}) rotate(${single.rotation})`}>
-            <line x1={0} y1={-single.h / 2} x2={0} y2={-single.h / 2 - 28 / view.z} stroke="#4da3ff" strokeWidth={stroke} />
+            <line x1={0} y1={-single.h / 2} x2={0} y2={-single.h / 2 - stalk} stroke="#4da3ff" strokeWidth={stroke} />
             <circle
               data-handle="rotate"
               className="handle handle-rotate"
               cx={0}
-              cy={-single.h / 2 - 28 / view.z}
+              cy={-single.h / 2 - stalk}
               r={hs * 0.75}
               fill="#fff"
               stroke="#4da3ff"

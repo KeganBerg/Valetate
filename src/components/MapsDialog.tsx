@@ -12,6 +12,8 @@ interface Props {
   onTemplate: (t: Template) => void;
   onDelete: (map: LotMap) => void;
   onImport: (file: File) => void;
+  /** start a blank lot with the step-by-step guide */
+  onGuide?: () => void;
   onClose?: () => void;
   canEdit: boolean;
 }
@@ -20,7 +22,7 @@ function Thumb({ map }: { map: LotMap }) {
   return <MapSvg map={map} className="thumb" />;
 }
 
-export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onImport, onClose, canEdit }: Props) {
+export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onImport, onGuide, onClose, canEdit }: Props) {
   const dialog = useDialog(onClose);
   const fileRef = useRef<HTMLInputElement>(null);
   const previews = useMemo(
@@ -31,11 +33,11 @@ export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onIm
 
   return (
     <div className="dialog-backdrop" onPointerDown={(e) => e.target === e.currentTarget && onClose?.()}>
-      <div className="dialog" {...dialog} aria-label="Lot maps">
+      <div className="dialog" {...dialog} aria-label="Your maps">
         <header>
-          <h2>Lot maps</h2>
+          <h2>{canEdit ? 'Your maps' : 'Maps'}</h2>
           <div className="grow" />
-          {canEdit && <button onClick={() => fileRef.current?.click()}>Import file…</button>}
+          {canEdit && <button onClick={() => fileRef.current?.click()}>Open a saved file</button>}
           <input
             ref={fileRef}
             type="file"
@@ -54,15 +56,9 @@ export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onIm
           )}
         </header>
 
-        {maps.length === 0 && canEdit && (
-          <p className="maps-intro">
-            Pick the map closest to your lot. You can move, add and renumber everything after.
-          </p>
-        )}
-
         {maps.length > 0 && (
           <section>
-            <h3>Your maps</h3>
+            <h3>Open a map</h3>
             <div className="cards">
               {maps.map((m) => (
                 <div key={m.id} className={`map-card ${m.id === currentId ? 'current' : ''}`}>
@@ -88,9 +84,21 @@ export function MapsDialog({ maps, currentId, onOpen, onTemplate, onDelete, onIm
           </section>
         )}
 
+        {canEdit && onGuide && (
+          <button className="choice-tile guide-tile" onClick={onGuide}>
+            <span className="choice-icon" aria-hidden="true">
+              🧭
+            </span>
+            <b>{maps.length ? 'Draw a new lot, step by step' : 'Draw my lot, step by step'}</b>
+            <span className="muted small">
+              Recommended. We find your venue on a satellite photo and show you how to add each row.
+            </span>
+          </button>
+        )}
+
         {canEdit && groups.map((g) => (
           <section key={g}>
-            <h3>{g === 'Start from' ? 'New map' : 'Examples from real venues'}</h3>
+            <h3>{g === 'Start from' ? 'Or start from a ready-made lot' : 'Examples from real venues'}</h3>
             <div className="cards">
               {previews
                 .filter(({ t }) => t.group === g)
