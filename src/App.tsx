@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { ASSETS, type AssetDef } from './assets';
 import { Canvas, MAX_Z, MIN_Z, type View } from './components/Canvas';
 import { Inspector } from './components/Inspector';
+import { AlignBar } from './components/Satellite';
+import { ATTRIBUTION } from './backdrop';
 import { MapsDialog } from './components/MapsDialog';
 import { Palette } from './components/Palette';
 import { exportJson, exportPng, exportSvg, parseMapFile } from './export';
@@ -86,6 +88,7 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
   const [showGrid, setShowGrid] = useState(true);
   const [saving, setSaving] = useState<'saved' | 'saving' | 'error'>('saved');
   const [panel, setPanel] = useState<'none' | 'palette' | 'inspector'>('none');
+  const [alignOn, setAlignOn] = useState(false);
   // on a phone the panels are sheets over the map: back closes them
   const [phone, setPhone] = useState(() => matchMedia('(max-width: 820px)').matches);
   useEffect(() => {
@@ -227,6 +230,10 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
       }),
     [source, canEdit], // eslint-disable-line react-hooks/exhaustive-deps
   );
+
+  // lining up the satellite photo ends on its own when the photo goes away or the map changes
+  const aligning = alignOn && canEdit && !!map.backdrop && !map.backdrop.hidden;
+  useEffect(() => setAlignOn(false), [map.id]);
 
   const mapNow = useRef(map);
   mapNow.current = map;
@@ -538,7 +545,12 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
               if (a) addAsset(a, { x, y });
             }}
             readOnly={!canEdit}
+            aligning={aligning}
           />
+          {aligning && map.backdrop && (
+            <AlignBar backdrop={map.backdrop} onChange={(backdrop) => dispatch({ type: 'meta', patch: { backdrop } })} onDone={() => setAlignOn(false)} />
+          )}
+          {map.backdrop && !map.backdrop.hidden && <div className="sat-credit">{ATTRIBUTION}</div>}
           <div className="zoom">
             <button onClick={() => zoomBy(1 / 1.25)} aria-label="Zoom out">
               −
@@ -618,6 +630,11 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
             onOrder={order}
             open={panel === 'inspector'}
             onClose={() => setPanel('none')}
+            onAlign={() => {
+              setAlignOn(true);
+              setPanel('none');
+              dispatch({ type: 'select', ids: [] });
+            }}
           />
         )}
       </main>

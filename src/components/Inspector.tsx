@@ -3,6 +3,7 @@ import { ASSETS, SURFACES, SWATCHES, assetFor } from '../assets';
 import { rowNumbers, spotLabel } from '../geometry';
 import type { LotMap, MapItem } from '../types';
 import { SheetHandle } from './SheetHandle';
+import { SatellitePanel } from './Satellite';
 
 interface Props {
   map: LotMap;
@@ -18,6 +19,8 @@ interface Props {
   onOrder: (where: 'front' | 'back') => void;
   open: boolean;
   onClose: () => void;
+  /** start lining up the satellite photo on the map */
+  onAlign: () => void;
 }
 
 /** Number field that lets you clear it while typing without snapping back to 0. */
@@ -116,6 +119,7 @@ export function Inspector(p: Props) {
             ))}
           </div>
         </div>
+        <SatellitePanel map={map} onChange={(backdrop) => p.onMeta({ backdrop })} onAlign={p.onAlign} />
         <div className="stats">
           <div>
             <b>{p.spotCount}</b> parking spots

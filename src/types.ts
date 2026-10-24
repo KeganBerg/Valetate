@@ -59,6 +59,27 @@ export interface LotMap {
   updatedAt: number;
   /** goes up on every shared save; absent until the map is saved to a company */
   version?: number;
+  /** a satellite photo of the real lot under the drawing, to trace over */
+  backdrop?: MapBackdrop;
+}
+
+/**
+ * Where the real world sits under a map: the point (lat, lng) is drawn at map
+ * point (x, y), `scale` map units make a meter, and the photo is turned
+ * `rotation` degrees so the real rows line up with the drawn ones.
+ */
+export interface MapBackdrop {
+  lat: number;
+  lng: number;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+  /** 0–1 */
+  opacity: number;
+  hidden?: boolean;
+  /** what was searched for, shown back in the panel */
+  place?: string;
 }
 
 /**
