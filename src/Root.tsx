@@ -218,7 +218,7 @@ function Login({ invited }: { invited: boolean }) {
         ) : invited ? (
           <p className="info">You've been invited to a team. Sign in, or create an account if you're new, to join.</p>
         ) : (
-          <p className="muted">The live lot for your whole valet team.</p>
+          <p className="muted">Draw your valet lot in minutes. Share it with your team.</p>
         )}
         {exists && (
           <p className="info">

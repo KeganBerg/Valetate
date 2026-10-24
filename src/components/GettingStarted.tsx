@@ -7,8 +7,8 @@ export interface Step {
   action?: { label: string; run: () => void };
 }
 
-/** The first three things a new company does, shown to its admin until they're done. */
-export function GettingStarted({ company, steps, onHide }: { company: string; steps: Step[]; onHide: () => void }) {
+/** The first things a new company does, shown to its admin until they're done. */
+export function GettingStarted({ company, steps, done, onHide }: { company: string; steps: Step[]; done: string; onHide: () => void }) {
   const left = steps.filter((s) => !s.done).length;
   const next = steps.find((s) => !s.done);
   // on a phone it starts as one line so it doesn't cover the lot
@@ -19,7 +19,7 @@ export function GettingStarted({ company, steps, onHide }: { company: string; st
         <button className="gs-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>
           <span className="gs-title">{left ? `Set up ${company}` : `${company} is ready`}</span>
           <span className="muted small gs-sub">
-            {left ? `${steps.length - left} of ${steps.length} done` : 'Your team can park and find cars on the live lot.'}
+            {left ? `${steps.length - left} of ${steps.length} done` : done}
             {!open && next && ` · Next: ${next.label}`}
           </span>
         </button>

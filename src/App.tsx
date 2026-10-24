@@ -78,6 +78,23 @@ function writeLastTag(tag: string) {
   }
 }
 
+// per device: an admin who only draws maps never sees the parking and ops screens
+const LIVE_TOOLS_KEY = 'valetate.liveTools';
+function readLiveTools(): boolean {
+  try {
+    return localStorage.getItem(LIVE_TOOLS_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function writeLiveTools(on: boolean) {
+  try {
+    localStorage.setItem(LIVE_TOOLS_KEY, on ? '1' : '0');
+  } catch {
+    // not remembered; it starts hidden again next time
+  }
+}
+
 function initials(name: string) {
   const parts = name.trim().split(/[\s@._-]+/).filter(Boolean);
   return ((parts[0]?.[0] ?? '?') + (parts[1]?.[0] ?? '')).toUpperCase();
@@ -126,6 +143,15 @@ export default function App({ source, role, account, initialMaps, initialCars, c
   const [snapOn, setSnapOn] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
   const [mode, setMode] = useState<'edit' | 'live'>(canEdit ? 'edit' : 'live');
+  // the map editor comes first; the live lot (parking, requests, tips, reports) is opt-in from the menu
+  const [opsOn, setOpsOnState] = useState(readLiveTools);
+  const showOps = opsOn || !canEdit;
+  const setOpsOn = (on: boolean) => {
+    setOpsOnState(on);
+    writeLiveTools(on);
+    if (!on) setMode('edit');
+    flash(on ? 'Live lot turned on: switch to it at the top' : 'Live lot hidden: just the map editor');
+  };
   const [saving, setSaving] = useState<'saved' | 'saving' | 'error'>('saved');
   const [panel, setPanel] = useState<'none' | 'palette' | 'inspector'>('none');
   // on a phone the panels are sheets over the map: back closes them
@@ -912,7 +938,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
   );
 
   return (
-    <div className={`app mode-${mode}`}>
+    <div className={`app mode-${mode} ${showOps ? 'ops-on' : ''}`}>
       <header className="topbar">
         <div className="brand">
           <span className="logo">V</span>
@@ -921,7 +947,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
         <button className="map-name" onClick={() => setShowMaps(true)} title="Switch map">
           {map.name || 'Untitled lot'} <span className="caret">▾</span>
         </button>
-        {canEdit && (
+        {canEdit && showOps && (
           <div className="seg" role="tablist">
             <button className={mode === 'edit' ? 'on' : ''} onClick={() => setMode('edit')}>
               Edit map
@@ -937,14 +963,14 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             </button>
           </div>
         )}
-        {!dockFind && findForm}
+        {!dockFind && (showOps || !phone) && findForm}
         <div className="grow" />
         {mode === 'edit' && (
           <div className="tools">
-            <button onClick={() => dispatch({ type: 'undo' })} disabled={!state.past.length} title="Undo (Ctrl+Z)">
+            <button className="history" onClick={() => dispatch({ type: 'undo' })} disabled={!state.past.length} title="Undo (Ctrl+Z)" aria-label="Undo">
               ↶
             </button>
-            <button onClick={() => dispatch({ type: 'redo' })} disabled={!state.future.length} title="Redo (Ctrl+Shift+Z)">
+            <button className="history" onClick={() => dispatch({ type: 'redo' })} disabled={!state.future.length} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
               ↷
             </button>
             <button className={showGrid ? 'on' : ''} onClick={() => setShowGrid(!showGrid)} title="Show grid">
@@ -963,7 +989,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
         <details className="menu">
           <summary aria-label="Menu">
             {account ? <span className="avatar">{initials(account.name || account.email)}</span> : <span className="dots">•••</span>}
-            {openIncidents > 0 && role !== 'valet' && <span className="menu-dot" aria-label={`${openIncidents} open incidents`} />}
+            {showOps && openIncidents > 0 && role !== 'valet' && <span className="menu-dot" aria-label={`${openIncidents} open incidents`} />}
           </summary>
           <div className="menu-list" onClick={(e) => (e.currentTarget.parentElement as HTMLDetailsElement).removeAttribute('open')}>
             {account && (
@@ -978,16 +1004,34 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             {account?.onTeam && <button onClick={account.onTeam}>Team and roles</button>}
             {account?.onSwitchCompany && <button onClick={account.onSwitchCompany}>Switch company</button>}
             {account && <hr />}
-            {mode === 'live' && <button onClick={() => setShiftOpen(true)}>Shift and tips</button>}
-            <button onClick={() => setIncidentSheet({ car: null })}>
-              Incidents{openIncidents > 0 && <span className="menu-count">{openIncidents} open</span>}
-            </button>
-            {role !== 'valet' && <button onClick={() => setReportOpen(true)}>Stand report</button>}
-            {role !== 'valet' && <button onClick={() => setRatesOpen(true)}>Rates and validations</button>}
-            {mode === 'live' && <button onClick={() => setEventDialog(true)}>{event ? 'Event: change let-out time' : 'Start event mode'}</button>}
+            {showOps && (
+              <>
+                {mode === 'live' && <button onClick={() => setShiftOpen(true)}>Shift and tips</button>}
+                <button onClick={() => setIncidentSheet({ car: null })}>
+                  Incidents{openIncidents > 0 && <span className="menu-count">{openIncidents} open</span>}
+                </button>
+                {role !== 'valet' && <button onClick={() => setReportOpen(true)}>Stand report</button>}
+                {role !== 'valet' && <button onClick={() => setRatesOpen(true)}>Rates and validations</button>}
+                {mode === 'live' && <button onClick={() => setEventDialog(true)}>{event ? 'Event: change let-out time' : 'Start event mode'}</button>}
+                <hr />
+              </>
+            )}
+            <button onClick={() => setShowMaps(true)}>Maps and templates</button>
             <button onClick={() => exportPng(map).catch((e) => flash(e.message))}>Save map as image (PNG)</button>
             <button onClick={() => exportSvg(map)}>Save map as vector (SVG)</button>
             <button onClick={() => exportJson(map)}>Export map file</button>
+            {canEdit && (
+              <>
+                <hr />
+                <button className="menu-toggle" role="switch" aria-checked={opsOn} onClick={() => setOpsOn(!opsOn)}>
+                  <span>
+                    Live lot tools
+                    <small>Park cars, requests, tips and reports</small>
+                  </span>
+                  <i className={`switch ${opsOn ? 'on' : ''}`} aria-hidden="true" />
+                </button>
+              </>
+            )}
             {account && (
               <>
                 <hr />
@@ -1057,6 +1101,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             <GettingStarted
               company={account.companyName}
               onHide={() => saveSetup({ hidden: true })}
+              done={showOps ? 'Your team can park and find cars on the live lot.' : 'Your lot is drawn and your team can open it.'}
               steps={[
                 {
                   label: 'Draw your lot',
@@ -1070,12 +1115,16 @@ export default function App({ source, role, account, initialMaps, initialCars, c
                   done: (account.teamSize ?? 1) > 1,
                   action: account.onTeam && { label: 'Invite', run: account.onTeam },
                 },
-                {
-                  label: 'Park your first car',
-                  hint: 'On the live lot, tap an open spot.',
-                  done: !!setup.parked,
-                  action: mode === 'live' ? undefined : { label: 'Live lot', run: () => setMode('live') },
-                },
+                ...(showOps
+                  ? [
+                      {
+                        label: 'Park your first car',
+                        hint: 'On the live lot, tap an open spot.',
+                        done: !!setup.parked,
+                        action: mode === 'live' ? undefined : { label: 'Live lot', run: () => setMode('live') },
+                      },
+                    ]
+                  : []),
               ]}
             />
           )}
