@@ -377,7 +377,13 @@ export function Canvas({
           <rect width={GRID * 20} height={GRID * 20} fill="url(#grid-minor)" />
           <path d={`M ${GRID * 20} 0 L 0 0 0 ${GRID * 20}`} fill="none" stroke="#fff" strokeOpacity={0.16} strokeWidth={1} />
         </pattern>
+        <radialGradient id="stage-bg" cx="50%" cy="40%" r="75%">
+          <stop offset="0" stopColor="#1d2229" />
+          <stop offset="1" stopColor="#101317" />
+        </radialGradient>
       </defs>
+      {/* paint every pixel each frame: without it iPhone Safari leaves trails of the lot behind when zooming out */}
+      <rect width="100%" height="100%" fill="url(#stage-bg)" />
       <g transform={`translate(${view.x} ${view.y}) scale(${view.z})`}>
         <rect
           x={-6}
