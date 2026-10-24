@@ -122,11 +122,11 @@ export const ASSETS: AssetDef[] = [
   },
   { kind: 'arrow', name: 'Arrow', category: 'Markings', w: 30, h: 72, defaults: { color: '#ffffff' }, hasColor: true },
   { kind: 'crosswalk', name: 'Crosswalk', category: 'Markings', w: 120, h: 60 },
-  { kind: 'laneLine', name: 'Lane line', category: 'Markings', w: 220, h: 8, defaults: { color: '#f2c94c' }, hasColor: true },
+  { kind: 'laneLine', name: 'Painted line', category: 'Markings', w: 220, h: 8, defaults: { color: '#f2c94c' }, hasColor: true },
   { kind: 'curb', name: 'Curb / barrier', category: 'Markings', w: 160, h: 8, defaults: { color: '#1f2328' }, hasColor: true },
   {
     kind: 'zone',
-    name: 'Zone',
+    name: 'Colored area',
     category: 'Markings',
     w: 300,
     h: 200,
@@ -137,7 +137,7 @@ export const ASSETS: AssetDef[] = [
   },
   {
     kind: 'label',
-    name: 'Text',
+    name: 'Words',
     category: 'Markings',
     w: 180,
     h: 32,

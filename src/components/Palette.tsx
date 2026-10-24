@@ -25,19 +25,28 @@ function Preview({ a }: { a: AssetDef }) {
 }
 
 export function Palette({ onAdd, open, onClose }: { onAdd: (a: AssetDef) => void; open: boolean; onClose: () => void }) {
-  const groups = ['Parking', 'Structure', 'Nature', 'Markings'] as const;
+  const groups = [
+    ['Parking', 'Parking'],
+    ['Structure', 'Buildings and walls'],
+    ['Nature', 'Trees and plants'],
+    ['Markings', 'Paint and signs'],
+  ] as const;
   return (
     <aside className={`palette ${open ? 'open' : ''}`}>
       <SheetHandle onClose={onClose} />
-      {groups.map((g) => (
+      <p className="palette-intro">
+        <span className="touch-only">Tap a picture to put it on your lot.</span>
+        <span className="mouse-only">Click a picture to add it, or drag it onto the map.</span>
+      </p>
+      {groups.map(([g, title]) => (
         <section key={g}>
-          <h3>{g}</h3>
+          <h3>{title}</h3>
           <div className="asset-grid">
             {ASSETS.filter((a) => a.category === g).map((a) => (
               <button
                 key={a.name}
                 className="asset"
-                title={`${a.name}: click to add, or drag onto the map`}
+                title={`Add ${a.name.toLowerCase()}`}
                 draggable
                 onDragStart={(e) => {
                   e.dataTransfer.setData('application/x-valetate-asset', a.name);
@@ -53,7 +62,7 @@ export function Palette({ onAdd, open, onClose }: { onAdd: (a: AssetDef) => void
         </section>
       ))}
       <p className="tip">
-        Tip: drag empty space to pan, scroll or pinch to zoom, Shift-drag to select several things.
+        To look around, drag an empty part of the map. To zoom, pinch with two fingers or use the mouse wheel.
       </p>
     </aside>
   );
