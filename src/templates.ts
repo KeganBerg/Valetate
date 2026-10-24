@@ -46,77 +46,127 @@ function blank(): Omit<LotMap, 'id' | 'updatedAt'> {
   return { name: 'Untitled lot', width: 1400, height: 900, surface: '#5d6168', items: [] };
 }
 
+/**
+ * An open lot along a street: five rows, two-way drive aisles, and a one-way valet
+ * drop-off lane in front. Cars come in at the bottom left, stop at the stand, and
+ * leave at the bottom right; valets loop up the right side and back down the left.
+ */
 function surfaceLot(): Omit<LotMap, 'id' | 'updatedAt'> {
+  const W = 1320;
+  const grass = '#5f8f4e';
   const items: MapItem[] = [
+    // landscaping along the back edge
+    box('island', 0, 0, W, 50, { color: grass }),
+    // rows: 30 spaces each between two 120-wide end aisles
     row(120, 60, 1080, 80, 'A', 1, 30),
     row(120, 260, 1080, 80, 'B', 1, 30),
     row(120, 340, 1080, 80, 'C', 1, 30),
     row(120, 540, 1080, 80, 'D', 1, 30),
     row(120, 620, 1080, 80, 'E', 1, 30),
-    at('arrow', 60, 450, 30, 72, 0),
-    at('arrow', 1260, 450, 30, 72, 180),
-    at('booth', 660, 830, 46, 46),
-    text(660, 790, 'VALET STAND', 18),
-    at('crosswalk', 660, 760, 120, 40),
-    at('tree', 60, 70, 70, 70),
-    at('tree', 1260, 70, 70, 70),
-    at('palm', 60, 820, 72, 72),
-    at('palm', 1260, 820, 72, 72),
+    // valets loop up the right end aisle and back down the left one
+    at('arrow', 1260, 380, 26, 70, 0),
+    at('arrow', 60, 380, 26, 70, 180),
+    // island between the lot and the drop-off lane, with the valet stand
+    box('island', 200, 812, 920, 48, { color: grass }),
+    at('booth', 660, 836, 44, 44),
+    at('palm', 250, 836, 56, 56),
+    at('palm', 1070, 836, 56, 56),
+    at('bush', 420, 836, 44, 30),
+    at('bush', 900, 836, 44, 30),
+    // drop-off lane, one way left to right
+    text(660, 905, 'VALET DROP-OFF', 20),
+    at('arrow', 420, 912, 22, 60, 90),
+    at('arrow', 900, 912, 22, 60, 90),
+    // sidewalk along the street, with the entrance and exit cut in
+    box('island', 180, 960, 960, 18, { color: '#a9adb3' }),
+    box('wall', 0, 982, W, 58, { color: '#3d4148' }),
+    at('arrow', 60, 912, 26, 70, 0),
+    text(60, 1011, 'ENTER', 18),
+    at('arrow', 1260, 912, 26, 70, 180),
+    text(1260, 1011, 'EXIT', 18),
+    text(660, 1011, 'STREET', 16, '#c9ccd1'),
+    at('tree', 70, 25, 46, 46),
+    at('tree', 660, 25, 46, 46),
+    at('tree', 1250, 25, 46, 46),
   ];
-  return { name: 'Surface lot', width: 1320, height: 900, surface: '#5d6168', items };
+  return { name: 'Surface lot', width: W, height: 1040, surface: '#5d6168', items };
 }
 
-/** A typical one-level garage: 120 numbered spaces in six color-coded rows. */
+/**
+ * One level of a parking structure, drawn to scale (about 4.4 px per foot):
+ * 9 ft × 18 ft stalls on 24 ft two-way aisles, a loop of aisles around three bays,
+ * the entrance and exit at the bottom left, the ramp in its own walled bay, and the
+ * stair and elevator core in the corner next to it. Nothing sits on a driving lane.
+ */
 function garageLevel(): Omit<LotMap, 'id' | 'updatedAt'> {
-  const W = 1312;
+  const W = 1212;
+  const H = 1010;
+  const T = 16; // wall thickness
+  const L = 20; // outside edge
+  const R = W - L; // 1192
+  const B = 902; // bottom of the deck
+  const STALL = 80; // 18 ft
+  const AISLE = 110; // 24 ft
+  const rowsX = 146; // left end aisle is 36–146
+  const rowsW = 800; // 20 stalls × 40 (9 ft)
+  const rampBay = rowsX + rowsW + AISLE; // 1056, right end aisle is 946–1056
+  // rows from the top wall down: single, aisle, double, aisle, double, aisle, single
+  const y1 = L + T; // 36
+  const aA = y1 + STALL; // 116
+  const y2 = aA + AISLE; // 226
+  const gap = 20; // column line between back-to-back stalls
+  const y3 = y2 + STALL + gap; // 326
+  const aB = y3 + STALL; // 406
+  const y4 = aB + AISLE; // 516
+  const y5 = y4 + STALL + gap; // 616
+  const aC = y5 + STALL; // 696
+  const y6 = aC + AISLE; // 806
+  const colors = ['#e6b800', '#2e9e44', '#2f6fdb', '#8a3fc7', '#d93636', '#f08a24'];
+  const rampTop = 300;
+  const rampFoot = 700;
+
   const items: MapItem[] = [
-    // outer walls
-    box('wall', 28, 20, W - 56, 16),
-    box('wall', 28, 20, 16, 1150),
-    box('wall', W - 44, 20, 16, 1150),
-    box('wall', 28, 1154, 470, 16),
-    box('wall', 482, 960, 16, 210),
-    box('wall', 800, 960, W - 828, 16),
-    // spaces
-    row(68, 52, 1177, 92, '', 1, 20, { color: '#e6b800' }),
-    row(68, 196, 1177, 92, '', 21, 20, { color: '#2e9e44' }),
-    row(68, 376, 1177, 92, '', 41, 20, { color: '#2f6fdb' }),
-    box('island', 340, 500, 612, 172, { color: '#a9adb3' }),
-    row(352, 510, 588, 74, '', 61, 10, { color: '#8a3fc7' }),
-    row(352, 588, 588, 74, '', 71, 10, { color: '#8a3fc7' }),
-    row(68, 744, 1177, 86, '', 81, 20, { color: '#d93636' }),
-    row(68, 870, 1177, 84, '', 101, 20, { color: '#f08a24' }),
-    // stairs & elevator core
-    box('wall', 1142, 474, 128, 244, { color: '#2a2d33' }),
-    box('stairs', 1178, 504, 76, 100),
-    box('elevator', 1178, 614, 76, 88),
-    // traffic
-    text(290, 331, 'ONE WAY', 22),
-    text(980, 331, 'ONE WAY', 22),
-    text(290, 710, 'ONE WAY', 22),
-    text(980, 710, 'ONE WAY', 22),
-    at('arrow', 180, 331, 22, 60, -90),
-    at('arrow', 1084, 331, 22, 60, 90),
-    at('arrow', 180, 710, 22, 60, -90),
-    at('arrow', 1084, 710, 22, 60, 90),
-    at('arrow', 150, 580, 24, 72, 0),
-    at('arrow', 242, 580, 24, 72, 0),
-    at('arrow', 1018, 580, 24, 72, 180),
-    at('arrow', 1086, 580, 24, 72, 180),
-    box('ramp', 92, 990, 236, 160, { label: 'RAMP UP' }),
-    at('laneLine', 648, 1065, 210, 8, 90),
-    at('arrow', 570, 1030, 26, 70, 0),
-    at('arrow', 723, 1030, 26, 70, 180),
-    text(570, 1088, 'ENTRANCE', 20),
-    text(723, 1088, 'EXIT', 20),
-    text(1075, 1040, 'GARAGE · LEVEL 1', 24, '#1f2328'),
+    // the street outside
+    box('wall', 0, B, W, H - B, { color: '#5d6168' }),
+    // outer walls, with the driveway cut into the bottom left
+    box('wall', L, L, R - L, T),
+    box('wall', L, L, T, B - L),
+    box('wall', R - T, L, T, B - L),
+    box('wall', rowsX, B - T, R - rowsX, T),
+    // stalls, numbered 1–120 from the top
+    ...[y1, y2, y3, y4, y5, y6].map((y, i) => row(rowsX, y, rowsW, STALL, '', 1 + i * 20, 20, { color: colors[i] })),
+    // stair and elevator core in the top right corner, door onto the end aisle
+    box('wall', rampBay, y1, 8, rampFoot - y1),
+    box('wall', rampBay + 8, y1, R - T - rampBay - 8, rampTop - 20 - y1, { color: '#3a3e45' }),
+    box('stairs', rampBay + 24, y1 + 14, 80, 96),
+    box('elevator', rampBay + 24, y1 + 126, 80, 84),
+    at('crosswalk', rowsX + rowsW + AISLE / 2, y1 + 40, AISLE - 8, 44),
+    // ramp up, in its own bay; cars swing in from the bottom of the right end aisle
+    box('ramp', rampBay + 14, rampTop, R - T - rampBay - 20, rampFoot - rampTop, { label: 'RAMP UP' }),
+    // two-way aisles: keep right
+    ...[aA, aB, aC].flatMap((a) => [
+      at('arrow', 330, a + 28, 20, 56, -90),
+      at('arrow', 760, a + 28, 20, 56, -90),
+      at('arrow', 330, a + AISLE - 28, 20, 56, 90),
+      at('arrow', 760, a + AISLE - 28, 20, 56, 90),
+    ]),
+    ...[36, rowsX + rowsW].flatMap((x) => [
+      at('arrow', x + 28, 460, 20, 56, 180),
+      at('arrow', x + AISLE - 28, 460, 20, 56, 0),
+    ]),
+    // driveway out to the street
+    at('laneLine', 91, 956, 108, 8, 90),
+    at('arrow', 118, 950, 22, 60, 0),
+    at('arrow', 64, 950, 22, 60, 180),
+    text(250, 956, 'ENTRANCE / EXIT', 20),
+    text(940, 956, 'GARAGE · LEVEL 1', 24),
   ];
-  // structural columns between rows
-  for (const x of [324, 652, 985]) {
-    for (const y of [44, 186, 378, 746, 880]) items.push(at('pole', x, y, 18, 18));
+  // structural columns every four stalls (35 ft) along the column lines and walls
+  for (let x = rowsX; x <= rowsX + rowsW; x += 160) {
+    items.push(at('pole', x, y2 + STALL + gap / 2, 18, 18), at('pole', x, y4 + STALL + gap / 2, 18, 18));
+    items.push(at('pole', x, L + T / 2, T, T), at('pole', x, B - T / 2, T, T));
   }
-  items.push(at('pole', 342, 578, 18, 18), at('pole', 950, 578, 18, 18));
-  return { name: 'Garage level 1', width: W, height: 1200, surface: '#b8bbc0', items };
+  return { name: 'Garage level 1', width: W, height: H, surface: '#b8bbc0', items };
 }
 
 // ---------- examples recreated from real valet maps ----------
@@ -166,7 +216,7 @@ function browardFront(): Omit<LotMap, 'id' | 'updatedAt'> {
     box('building', 700, 150, 330, 190, { label: 'Amaturo Theater', color: '#e7dfc9' }),
     box('building', 920, 400, 340, 170, { label: 'Abdo New River Room', color: '#e7dfc9' }),
     box('building', 700, 600, 220, 50, { label: 'Intermezzo Lounge', color: '#e7dfc9' }),
-    at('building', 470, 230, 160, 110, 35, { label: "Marti's Bistro", color: '#c9b79c' }),
+    at('building', 410, 225, 160, 110, 35, { label: "Marti's Bistro", color: '#c9b79c' }),
     box('island', 520, 420, 150, 360, { color: '#7fb3d5' }),
     // the ramp, bottom-left to top-right
     at('spaceRow', 330, 900, 340, 40, -62, { prefix: 'R1', start: 1, count: 6, color: '#f2c94c' }),
@@ -179,11 +229,11 @@ function browardFront(): Omit<LotMap, 'id' | 'updatedAt'> {
     at('palm', 380, 380, 60, 60),
     at('tree', 250, 640, 90, 90),
     at('tree', 1120, 80, 90, 90),
-    text(170, 60, 'Broward Center · Front', 30),
-    text(170, 100, 'R = Ramp (yellow tickets / Preferred Parking)', 16),
-    text(170, 126, 'V = Valet booth', 16),
+    text(250, 60, 'Broward Center · Front', 30),
+    text(250, 100, 'R = Ramp (yellow tickets / Preferred Parking)', 16),
+    text(250, 126, 'V = Valet booth', 16),
   ];
-  return { name: 'Broward Center – Front ramp', width: 1300, height: 1060, surface: '#6f7378', items };
+  return { name: 'Broward Center – Front ramp', width: 1300, height: 1090, surface: '#6f7378', items };
 }
 
 /** West Palm Beach Marriott, 1001 Okeechobee Blvd. */
@@ -199,7 +249,7 @@ function marriottWpb(): Omit<LotMap, 'id' | 'updatedAt'> {
     space(305, 388, 52, 22, '46'),
     vrow(385, 145, 52, 123, '', 54, 5),
     vrow(502, 70, 54, 200, '', 65, 8, { reverse: true }),
-    at('spaceRow', 614, 605, 210, 30, -32, { prefix: 'R', start: 1, count: 4, color: '#f2c94c' }),
+    at('spaceRow', 575, 575, 210, 30, -32, { prefix: 'R', start: 1, count: 4, color: '#f2c94c' }),
     box('zone', 376, 282, 62, 128, { label: '', color: '#2f80ed' }),
     at('crosswalk', 368, 410, 240, 16, 90),
     at('curb', 100, 424, 90, 6),
@@ -215,18 +265,18 @@ function marriottWpb(): Omit<LotMap, 'id' | 'updatedAt'> {
     at('arrow', 680, 360, 18, 90, 180, { color: '#3fae5a' }),
     at('arrow', 755, 340, 18, 110, 0, { color: '#3fae5a' }),
     at('arrow', 328, 590, 14, 60, 180, { color: '#3fae5a' }),
-    at('arrow', 530, 615, 14, 80, 58, { color: '#3fae5a' }),
+    at('arrow', 551, 537, 14, 80, 58, { color: '#3fae5a' }),
     at('tree', 620, 60, 120, 120),
     at('tree', 640, 190, 130, 130),
-    at('tree', 600, 320, 110, 110),
+    at('tree', 614, 330, 100, 100),
     at('tree', 30, 30, 60, 60),
-    at('palm', 130, 125, 56, 56),
-    at('palm', 215, 122, 56, 56),
-    at('palm', 322, 125, 56, 56),
-    at('palm', 412, 128, 56, 56),
-    at('palm', 215, 420, 50, 50),
-    at('palm', 340, 428, 50, 50),
-    at('palm', 415, 420, 50, 50),
+    at('palm', 160, 112, 52, 52),
+    at('palm', 215, 112, 52, 52),
+    at('palm', 336, 116, 52, 52),
+    at('palm', 412, 116, 52, 52),
+    at('palm', 215, 446, 46, 46),
+    at('palm', 300, 446, 46, 46),
+    at('palm', 415, 446, 46, 46),
     at('palm', 590, 425, 54, 54),
     at('palm', 840, 385, 60, 60),
     at('palm', 715, 395, 56, 56),
@@ -241,8 +291,8 @@ function marriottWpb(): Omit<LotMap, 'id' | 'updatedAt'> {
 
 export const TEMPLATES: Template[] = [
   { key: 'blank', name: 'Blank lot', description: 'Start from an empty lot', group: 'Start from', build: blank },
-  { key: 'surface', name: 'Surface lot', description: 'Five lettered rows, booth and lanes', group: 'Start from', build: surfaceLot },
-  { key: 'garage', name: 'Garage level', description: '120 spaces, ramp, stairs, elevator', group: 'Start from', build: garageLevel },
+  { key: 'surface', name: 'Surface lot', description: '150 spaces, drop-off lane and valet stand', group: 'Start from', build: surfaceLot },
+  { key: 'garage', name: 'Garage level', description: '120 spaces, two-way aisles, ramp, stairs, elevator', group: 'Start from', build: garageLevel },
   { key: 'broward-back', name: 'Broward Center – Back lot', description: 'Rows A–J and the back lot', group: 'Examples', build: browardBackLot },
   { key: 'broward-front', name: 'Broward Center – Front ramp', description: 'Ramp spots R1, R, R2 and the booth', group: 'Examples', build: browardFront },
   { key: 'marriott-wpb', name: 'WPB Marriott', description: '1–72 plus ramp R1–R4', group: 'Examples', build: marriottWpb },

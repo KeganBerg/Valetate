@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findSpot, listSpots, rowNumbers, spotAt, toLocal, toWorld } from './geometry';
+import { findSpot, itemBounds, listSpots, rowNumbers, spotAt, toLocal, toWorld } from './geometry';
 import { reducer, initState } from './store';
 import { TEMPLATES } from './templates';
 import type { LotMap, MapItem } from './types';
@@ -61,12 +61,34 @@ describe('spots', () => {
   });
 });
 
+type Box = { x: number; y: number; w: number; h: number };
+
 describe('templates', () => {
   const build = (key: string) => TEMPLATES.find((t) => t.key === key)!.build();
 
   it('garage level has spaces 1 to 120', () => {
     const labels = listSpots(build('garage').items).map((s) => Number(s.label));
     expect(labels.sort((a, b) => a - b)).toEqual(Array.from({ length: 120 }, (_, i) => i + 1));
+  });
+
+  it.each(['surface', 'garage'])('%s: nothing sits on a parking space, and spaces never overlap', (key) => {
+    const map = build(key);
+    const spots = listSpots(map.items).map((s) => ({ label: s.label, x: s.cx - s.w / 2, y: s.cy - s.h / 2, w: s.w, h: s.h }));
+    const others = map.items
+      .filter((it) => it.kind !== 'space' && it.kind !== 'spaceRow')
+      .map((it) => ({ kind: it.kind, ...itemBounds(it) }));
+    const hit = (a: Box, b: Box) => a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5;
+    const clashes = [
+      ...spots.flatMap((s) => others.filter((o) => hit(s, o)).map((o) => `${o.kind} on space ${s.label}`)),
+      ...spots.flatMap((a, i) => spots.slice(i + 1).filter((b) => hit(a, b)).map((b) => `space ${a.label} on ${b.label}`)),
+    ];
+    expect(clashes).toEqual([]);
+    for (const b of [...spots, ...others]) {
+      expect(b.x).toBeGreaterThanOrEqual(0);
+      expect(b.y).toBeGreaterThanOrEqual(0);
+      expect(b.x + b.w).toBeLessThanOrEqual(map.width);
+      expect(b.y + b.h).toBeLessThanOrEqual(map.height);
+    }
   });
 
   it('Marriott matches the posted map, including ramp spots R1–R4', () => {
