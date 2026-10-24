@@ -1,4 +1,4 @@
-import type { LotMap } from '../types';
+import type { LotMap, Site } from '../types';
 
 export type Role = 'admin' | 'manager' | 'valet';
 
@@ -16,6 +16,10 @@ export const canEditMaps = (r: Role) => r === 'admin' || r === 'manager';
  */
 export interface DataSource {
   kind: 'local' | 'cloud';
+  listSites(): Promise<Site[]>;
+  saveSite(site: Site): Promise<void>;
+  /** deletes the site and every area in it */
+  deleteSite(id: string): Promise<void>;
   listMaps(): Promise<LotMap[]>;
   /**
    * Saves over `baseVersion` (the version this device last saw; none for a new

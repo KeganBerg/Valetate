@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { LotMap, MapBackdrop, MapItem } from '../types';
+import type { AreaKind, LotMap, MapBackdrop, MapItem, Site } from '../types';
 import { MapConflict, type DataSource, type Role } from './source';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -61,6 +61,9 @@ interface MapRow {
   surface: string;
   items: MapItem[];
   backdrop?: MapBackdrop | null;
+  site_id?: string | null;
+  area_kind?: AreaKind | null;
+  position?: number | null;
   updated_at: string;
   updated_by: string | null;
   version: number;
@@ -74,8 +77,25 @@ const toMap = (r: MapRow): LotMap => ({
   surface: r.surface,
   items: Array.isArray(r.items) ? r.items : [],
   ...(r.backdrop && { backdrop: r.backdrop }),
+  ...(r.site_id && { siteId: r.site_id }),
+  ...(r.area_kind && { areaKind: r.area_kind }),
+  position: r.position ?? 0,
   updatedAt: Date.parse(r.updated_at),
   version: r.version,
+});
+
+interface SiteRow {
+  id: string;
+  name: string;
+  address: string;
+  updated_at: string;
+}
+
+const toSite = (r: SiteRow): Site => ({
+  id: r.id,
+  name: r.name,
+  ...(r.address && { address: r.address }),
+  updatedAt: Date.parse(r.updated_at),
 });
 
 // ---------- account ----------
@@ -146,8 +166,37 @@ export const team = {
 
 export function cloudSource(companyId: string, userId: string): DataSource {
   let noVersions = false;
+  // before the sites migration: areas save without their site fields
+  let noSites = false;
+  const siteFields = (m: LotMap) =>
+    noSites ? {} : { site_id: m.siteId ?? null, area_kind: m.areaKind ?? 'lot', position: m.position ?? 0 };
   return {
     kind: 'cloud',
+    async listSites() {
+      const res = await db().from('sites').select('id, name, address, updated_at').eq('company_id', companyId).order('created_at');
+      if (res.error && /sites/.test(res.error.message) && /does not exist|could not find/i.test(res.error.message)) {
+        noSites = true;
+        return [];
+      }
+      return (check(res) as SiteRow[]).map(toSite);
+    },
+    async saveSite(s) {
+      check(
+        await db()
+          .from('sites')
+          .upsert({
+            id: s.id,
+            company_id: companyId,
+            name: s.name,
+            address: s.address ?? '',
+            updated_at: new Date(s.updatedAt).toISOString(),
+            updated_by: userId,
+          }),
+      );
+    },
+    async deleteSite(id) {
+      check(await db().from('sites').delete().eq('id', id));
+    },
     async listMaps() {
       const rows = check(
         await db().from('lot_maps').select('*').eq('company_id', companyId).order('updated_at', { ascending: false }),
@@ -162,6 +211,7 @@ export function cloudSource(companyId: string, userId: string): DataSource {
         surface: m.surface,
         items: m.items,
         backdrop: m.backdrop ?? null,
+        ...siteFields(m),
         updated_at: new Date(m.updatedAt).toISOString(),
         updated_by: userId,
       };
@@ -207,6 +257,7 @@ export function cloudSource(companyId: string, userId: string): DataSource {
       const ch = db()
         .channel(`company-${companyId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'lot_maps', filter: `company_id=eq.${companyId}` }, on.maps)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'sites', filter: `company_id=eq.${companyId}` }, on.maps)
         .subscribe((status) => {
           // changes made while disconnected are not replayed, so reload after every (re)join
           if (status === 'SUBSCRIBED') {
