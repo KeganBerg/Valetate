@@ -40,6 +40,8 @@ In the Supabase dashboard, open Authentication → URL Configuration and set **S
 
 Netlify builds and publishes the site from `main` using `netlify.toml`, and every pull request gets a deploy preview. GitHub Actions (`.github/workflows/ci.yml`) runs the tests and the build on each push.
 
+If Netlify's link to the repository is missing, `.github/workflows/deploy.yml` publishes `main` from GitHub instead. Add two repository secrets: `NETLIFY_AUTH_TOKEN` (Netlify → User settings → Applications → New access token) and `NETLIFY_SITE_ID` (the site's Site configuration → Site ID). Without them the workflow does nothing.
+
 ## Data model
 
 - `LotMap` holds `items: MapItem[]`. Each item is a box (`x, y, w, h`) rotated around its center.

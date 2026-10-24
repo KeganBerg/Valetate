@@ -1,0 +1,48 @@
+name: Deploy
+
+# Publishes main to Netlify from GitHub, so a new version goes live even when
+# Netlify's own link to the repository is missing. Needs two repository secrets:
+# NETLIFY_AUTH_TOKEN (Netlify > User settings > Applications > New access token)
+# and NETLIFY_SITE_ID (Netlify > the site > Site configuration > Site ID).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+    steps:
+      - name: Check the Netlify secrets are set
+        id: secrets
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ] || [ -z "$NETLIFY_SITE_ID" ]; then
+            echo "::warning::NETLIFY_AUTH_TOKEN or NETLIFY_SITE_ID is not set, so nothing was published."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.secrets.outputs.ready == 'true'
+        uses: actions/checkout@v4
+      - if: steps.secrets.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.secrets.outputs.ready == 'true'
+        run: npm ci
+      - if: steps.secrets.outputs.ready == 'true'
+        run: npm run build
+      - if: steps.secrets.outputs.ready == 'true'
+        name: Publish to Netlify
+        run: npx --yes netlify-cli@17 deploy --prod --dir=dist --message "main ${GITHUB_SHA::7}"
