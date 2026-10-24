@@ -71,7 +71,7 @@ describe('templates', () => {
     expect(labels.sort((a, b) => a - b)).toEqual(Array.from({ length: 120 }, (_, i) => i + 1));
   });
 
-  it.each(['surface', 'garage'])('%s: nothing sits on a parking space, and spaces never overlap', (key) => {
+  it.each(TEMPLATES.filter((t) => t.group === 'Start from').map((t) => t.key))('%s: nothing sits on a parking space, spaces never overlap, everything is inside', (key) => {
     const map = build(key);
     const spots = listSpots(map.items).map((s) => ({ label: s.label, x: s.cx - s.w / 2, y: s.cy - s.h / 2, w: s.w, h: s.h }));
     const others = map.items

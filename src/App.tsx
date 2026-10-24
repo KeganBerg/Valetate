@@ -5,10 +5,11 @@ import { Inspector, Stepper } from './components/Inspector';
 import { Guide } from './components/Guide';
 import { AlignBar } from './components/Satellite';
 import { ATTRIBUTION, placeBackdrop } from './backdrop';
-import { MapsDialog } from './components/MapsDialog';
+import { SitesDialog } from './components/SitesDialog';
+import { AreaDialog } from './components/AreaDialog';
 import { Palette } from './components/Palette';
 import { exportJson, exportPng, exportSvg, parseMapFile } from './export';
-import { GRID, duplicateSpotLabels, findSpot, listSpots, lotAround, snap, uid, unionBounds } from './geometry';
+import { GRID, duplicateSpotLabels, listSpots, lotAround, snap, uid, unionBounds } from './geometry';
 import { canEditMaps, MapConflict, ROLE_INFO, type DataSource, type Role } from './data/source';
 import { friendlyError } from './errors';
 import { currentMapId, setCurrentMapId } from './storage';
@@ -16,14 +17,19 @@ import { useBackToClose } from './dialog';
 import { saveCachedMaps } from './lotCache';
 import { GettingStarted } from './components/GettingStarted';
 import { initState, reducer } from './store';
-import { TEMPLATES, instantiate, type Template } from './templates';
-import type { LotMap, MapItem, Spot } from './types';
+import { TEMPLATES, instantiate, instantiateSite, type SiteTemplate, type Template } from './templates';
+import { AREA_KINDS, areaInfo, areasOf, findInSite, newSite, nextPosition } from './sites';
+import type { LotMap, MapItem, Site, Spot } from './types';
 
-function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean } {
+const blankTemplate = () => TEMPLATES.find((t) => t.key === 'blank') ?? TEMPLATES[0];
+
+function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean; draft?: Site } {
   const id = currentMapId();
   const found = maps.find((m) => m.id === id) ?? maps[0];
   if (found) return { map: found, firstRun: false };
-  return { map: instantiate(TEMPLATES[0]), firstRun: true };
+  // nothing yet: an empty site to start in, saved once something is drawn
+  const draft = newSite('My site');
+  return { map: instantiate(blankTemplate(), { siteId: draft.id, name: 'Whole site', position: 0 }), firstRun: true, draft };
 }
 
 /** Next unused row letter: A, B, … Z, AA, AB … */
@@ -74,17 +80,23 @@ interface Props {
   role: Role;
   account?: Account;
   initialMaps: LotMap[];
+  initialSites: Site[];
   /** where to keep a copy of the maps for opening with no signal */
   cacheKey?: string;
 }
 
-export default function App({ source, role, account, initialMaps, cacheKey }: Props) {
+export default function App({ source, role, account, initialMaps, initialSites, cacheKey }: Props) {
   const canEdit = canEditMaps(role);
   const init = useMemo(() => initialMap(initialMaps), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [state, dispatch] = useReducer(reducer, init.map, initState);
   const { map, selected } = state;
   const [maps, setMaps] = useState<LotMap[]>(initialMaps);
+  const [sites, setSites] = useState<Site[]>(initialSites);
+  // sites made on this device that aren't saved yet: saved just before their first area
+  const pendingSites = useRef(new Map<string, Site>(init.draft ? [[init.draft.id, init.draft]] : []));
   const [showMaps, setShowMaps] = useState(init.firstRun && canEdit);
+  const [showAddArea, setShowAddArea] = useState(false);
+  const [areaMenu, setAreaMenu] = useState(false);
   const [view, setViewState] = useState<View>({ x: 40, y: 40, z: 0.6 });
   // until someone pans or zooms, keep the lot fitted as the window changes size
   const autoFit = useRef(true);
@@ -131,9 +143,9 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
   };
   useEffect(() => {
     if (!cacheKey) return;
-    const t = window.setTimeout(() => saveCachedMaps(cacheKey, maps), 1000);
+    const t = window.setTimeout(() => saveCachedMaps(cacheKey, maps, sites), 1000);
     return () => window.clearTimeout(t);
-  }, [cacheKey, maps]);
+  }, [cacheKey, maps, sites]);
   const stageRef = useRef<HTMLDivElement>(null);
   const clipboard = useRef<MapItem[]>([]);
   const loadedRef = useRef<LotMap>(init.map);
@@ -168,6 +180,12 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
       saveChain.current = saveChain.current.then(async () => {
         if (gen !== conflicts.current) return;
         try {
+          const pending = m.siteId ? pendingSites.current.get(m.siteId) : undefined;
+          if (pending) {
+            await source.saveSite(pending);
+            pendingSites.current.delete(pending.id);
+            setSites((ss) => (ss.some((x) => x.id === pending.id) ? ss : [...ss, pending]));
+          }
           const v = await source.saveMap(m, versions.current.get(m.id));
           if (v !== undefined) versions.current.set(m.id, v);
           setSaving('saved');
@@ -226,9 +244,10 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
       source.subscribe({
         live: setLive,
         maps: async () => {
-          const ms = await source.listMaps().catch(() => null);
-          if (!ms) return;
+          const [ss, ms] = await Promise.all([source.listSites(), source.listMaps()]).catch(() => [null, null]);
+          if (!ms || !ss) return;
           setMaps(ms);
+          setSites([...ss, ...[...pendingSites.current.values()].filter((p) => !ss.some((x) => x.id === p.id))]);
           // someone else changed the map on screen: viewers follow along (editors keep their work)
           const cur = ms.find((m) => m.id === mapRef.current.id);
           if (cur && cur.updatedAt > mapRef.current.updatedAt && !canEdit) {
@@ -295,10 +314,10 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
 
   const fitLotToObjects = () => {
     const g = lotAround(map.items, map.width, map.height, { shrink: true });
-    if (!g) return flash('The lot already fits everything on it');
+    if (!g) return flash('The area already fits everything on it');
     applyLot(g);
     requestAnimationFrame(fit);
-    flash(`Lot is now ${g.width} × ${g.height}`);
+    flash(`The area is now ${g.width} × ${g.height}`);
   };
 
   const load = (m: LotMap, persist: boolean) => {
@@ -356,11 +375,18 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
   };
 
   const selItems = map.items.filter((i) => selected.includes(i.id));
-  const rowAsset = ASSETS.find((a) => a.kind === 'spaceRow')!;
 
-  /** open the step-by-step guide, on a fresh blank lot or on the map that's open */
-  const startGuide = (fresh: boolean) => {
-    if (fresh) load(instantiate(TEMPLATES.find((t) => t.key === 'blank') ?? TEMPLATES[0]), true);
+  /** open the step-by-step guide, on a new site, a new area of this site, or the area that's open */
+  const startGuide = (fresh: false | 'site' | 'area') => {
+    if (fresh === 'site') {
+      const s = newSite('New site');
+      pendingSites.current.set(s.id, s);
+      setSites((ss) => [...ss, s]);
+      load(instantiate(blankTemplate(), { siteId: s.id, name: 'Whole site', position: 0 }), true);
+    } else if (fresh === 'area' && map.siteId) {
+      setShowAddArea(false);
+      load(instantiate(blankTemplate(), { siteId: map.siteId, name: 'New area', position: nextPosition(maps, map.siteId) }), true);
+    }
     setShowMaps(false);
     dispatch({ type: 'select', ids: [] });
     setPanel('none');
@@ -418,13 +444,122 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
     setView({ z, x: r.width / 2 - s.cx * z, y: cy - s.cy * z });
   };
 
+  // ---------- sites and areas ----------
+
+  const site: Site | undefined = sites.find((x) => x.id === map.siteId) ?? (map.siteId ? pendingSites.current.get(map.siteId) : undefined);
+  // the areas of the site on screen, with the one being edited as it is now
+  const areas = useMemo(() => {
+    if (!map.siteId) return [map];
+    const list = areasOf(maps, map.siteId).map((a) => (a.id === map.id ? map : a));
+    return list.some((a) => a.id === map.id) ? list : areasOf([...list, map], map.siteId);
+  }, [maps, map]);
+
+  const openArea = (a: LotMap) => {
+    setAreaMenu(false);
+    if (a.id !== map.id) load(a, false);
+  };
+
+  /** a new site from a starting point: the site, then each of its areas */
+  const startSite = (t: SiteTemplate) => {
+    const s = newSite(t.name);
+    pendingSites.current.set(s.id, s);
+    setSites((ss) => [...ss, s]);
+    const [first, ...rest] = instantiateSite(t, s.id);
+    load(first, true);
+    for (const a of rest) {
+      upsertMapInList(a);
+      persistMap(a);
+    }
+    flash(`Started “${s.name}” with ${t.areas.length === 1 ? '1 area' : `${t.areas.length} areas`}. Rename anything by tapping it.`);
+  };
+
+  const renameSite = (s: Site, name: string) => {
+    const next = { ...s, name, updatedAt: Date.now() };
+    setSites((ss) => ss.map((x) => (x.id === s.id ? next : x)));
+    if (pendingSites.current.has(s.id)) pendingSites.current.set(s.id, next);
+    else source.saveSite(next).catch((e) => flash(friendlyError(e)));
+  };
+
+  const deleteSite = (s: Site) => {
+    pendingSites.current.delete(s.id);
+    source.deleteSite(s.id).catch((e) => flash(friendlyError(e)));
+    const restSites = sites.filter((x) => x.id !== s.id);
+    const restMaps = maps.filter((m) => m.siteId !== s.id);
+    setSites(restSites);
+    setMaps(restMaps);
+    if (map.siteId === s.id) {
+      const next = restSites.map((x) => areasOf(restMaps, x.id)[0]).find(Boolean);
+      if (next) load(next, false);
+      else {
+        const draft = newSite('My site');
+        pendingSites.current.set(draft.id, draft);
+        load(instantiate(blankTemplate(), { siteId: draft.id, name: 'Whole site', position: 0 }), false);
+        setShowMaps(true);
+      }
+    }
+    flash(`Deleted “${s.name}”`);
+  };
+
+  const addArea = (t: Template) => {
+    if (!map.siteId) return;
+    const taken = new Set(areas.map((a) => a.name));
+    const base = t.build().name;
+    let name = base;
+    for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
+    setShowAddArea(false);
+    load(instantiate(t, { siteId: map.siteId, name, position: nextPosition(maps, map.siteId) }), true);
+  };
+
+  /** move the area on screen one tab left (-1) or right (+1) */
+  const moveArea = (dir: -1 | 1) => {
+    const i = areas.findIndex((a) => a.id === map.id);
+    const j = i + dir;
+    if (j < 0 || j >= areas.length) return;
+    const order = [...areas];
+    [order[i], order[j]] = [order[j], order[i]];
+    const now = Date.now();
+    order.forEach((a, position) => {
+      if (a.position === position) return;
+      if (a.id === map.id) dispatch({ type: 'meta', patch: { position } });
+      else {
+        const moved = { ...a, position, updatedAt: now };
+        setMaps((ms) => ms.map((x) => (x.id === a.id ? moved : x)));
+        persistMap(moved);
+      }
+    });
+  };
+
+  const deleteArea = () => {
+    const i = areas.findIndex((a) => a.id === map.id);
+    const next = areas[i + 1] ?? areas[i - 1];
+    if (!next) return;
+    const gone = map;
+    source.deleteMap(gone.id).catch((e) => flash(friendlyError(e)));
+    setMaps((ms) => ms.filter((x) => x.id !== gone.id));
+    setAreaMenu(false);
+    load(next, false);
+    flash(`Deleted the “${gone.name}” area`, () => {
+      versions.current.delete(gone.id);
+      load({ ...gone, updatedAt: Date.now() }, true);
+    });
+  };
+
   const find = (q: string) => {
     if (!q.trim()) return;
-    const s = findSpot(map.items, q);
-    if (!s) return flash(`No spot called "${q}"`);
-    setHighlight(s);
-    centerOn(s);
-    if (canEdit) dispatch({ type: 'select', ids: [s.itemId] });
+    const found = findInSite(areas, map.id, q);
+    if (!found) return flash(`Nothing called "${q}" on this site`);
+    const s = found.spot;
+    const show = () => {
+      setHighlight(s);
+      centerOn(s);
+      if (canEdit) dispatch({ type: 'select', ids: [s.itemId] });
+    };
+    if (found.map.id !== map.id) {
+      load(found.map, false);
+      // after the new area has been fitted to the screen
+      requestAnimationFrame(() => requestAnimationFrame(show));
+      flash(`“${s.label}” is in ${found.map.name}`);
+    } else show();
     window.setTimeout(() => setHighlight((h) => (h === s ? null : h)), 4000);
   };
 
@@ -435,7 +570,7 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
         if (e.key === 'Escape') (e.target as HTMLElement).blur();
         return;
       }
-      if (showMaps || !canEdit) return;
+      if (showMaps || showAddArea || !canEdit) return;
       const mod = e.metaKey || e.ctrlKey;
       const k = e.key.toLowerCase();
       if (mod && k === 'z') {
@@ -477,8 +612,11 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
   const importFile = async (f: File) => {
     try {
       const m = parseMapFile(await f.text());
-      // always import as a new copy so it can't overwrite an existing map
-      load({ ...m, id: uid(), updatedAt: Date.now() }, true);
+      // always import as a new area of this site, so it can't overwrite an existing map
+      load(
+        { ...m, id: uid(), updatedAt: Date.now(), siteId: map.siteId, position: map.siteId ? nextPosition(maps, map.siteId) : 0, version: undefined },
+        true,
+      );
       flash(`Imported "${m.name}"`);
     } catch (err) {
       flash(err instanceof Error ? err.message : 'Could not import that file');
@@ -496,8 +634,8 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
           : 'Drag it to move it. Drag a white square to stretch it, or the round dot to turn it.'
         : map.items.length === 0
           ? phone
-            ? 'Tap ＋ Add at the bottom to put things on your lot.'
-            : 'Click a picture on the left (or drag it onto the lot) to add it.'
+            ? 'Tap ＋ Add at the bottom to put things on your map.'
+            : 'Click a picture on the left (or drag it onto the map) to add it.'
           : null;
 
   const findForm = (
@@ -511,8 +649,8 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Find spot: D 12"
-        aria-label="Find a spot"
+        placeholder="Find: D 12, First aid…"
+        aria-label="Find a space or place on this site"
         enterKeyHint="search"
       />
     </form>
@@ -525,8 +663,8 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
           <span className="logo">V</span>
           <span className="brand-name">Valetate</span>
         </div>
-        <button className="map-name" onClick={() => setShowMaps(true)} title="Switch map">
-          {map.name || 'Untitled lot'} <span className="caret">▾</span>
+        <button className="map-name" onClick={() => setShowMaps(true)} title="Switch to another site">
+          {site?.name || 'Untitled site'} <span className="caret">▾</span>
         </button>
         {(!canEdit || !phone) && findForm}
         <div className="grow" />
@@ -562,7 +700,8 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
             {account?.onTeam && <button onClick={account.onTeam}>Team and roles</button>}
             {account?.onSwitchCompany && <button onClick={account.onSwitchCompany}>Switch company</button>}
             {account && <hr />}
-            <button onClick={() => setShowMaps(true)}>{canEdit ? 'My maps and starting points' : 'All maps'}</button>
+            <button onClick={() => setShowMaps(true)}>{canEdit ? 'My sites and starting points' : 'All sites'}</button>
+            {canEdit && <button onClick={() => setShowAddArea(true)}>Add an area to this site</button>}
             {canEdit && <button onClick={() => startGuide(false)}>Show me how (step by step)</button>}
             <button onClick={() => exportPng(map).catch((e) => flash(e.message))}>Save map as image (PNG)</button>
             <button onClick={() => exportSvg(map)}>Save map as vector (SVG)</button>
@@ -576,6 +715,76 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
           </div>
         </details>
       </header>
+
+      <nav className="area-tabs" aria-label={`Areas of ${site?.name ?? 'this site'}`}>
+        {areas.map((a) => {
+          const on = a.id === map.id;
+          return (
+            <button
+              key={a.id}
+              className={`area-tab ${on ? 'on' : ''}`}
+              aria-current={on ? 'page' : undefined}
+              aria-expanded={on && canEdit ? areaMenu : undefined}
+              onClick={() => (on ? canEdit && setAreaMenu(!areaMenu) : openArea(a))}
+              title={on && canEdit ? 'Rename, move or delete this area' : `Open ${a.name}`}
+            >
+              <span aria-hidden="true">{areaInfo(a.areaKind).icon}</span> {a.name || 'Untitled area'}
+              {on && canEdit && <span className="caret"> ▾</span>}
+            </button>
+          );
+        })}
+        {canEdit && (
+          <button className="area-tab add-area" onClick={() => setShowAddArea(true)}>
+            ＋ Add an area
+          </button>
+        )}
+      </nav>
+      {areaMenu && canEdit && (
+        <div className="area-menu" role="dialog" aria-label="Change this area">
+          <label className="field">
+            <span>Area name</span>
+            <input
+              value={map.name}
+              onChange={(e) => dispatch({ type: 'meta', patch: { name: e.target.value } })}
+              onKeyDown={(e) => e.key === 'Enter' && setAreaMenu(false)}
+              placeholder="Front lawn, Lot B, Level 2…"
+            />
+          </label>
+          <label className="field">
+            <span>What kind of area</span>
+            <select value={map.areaKind ?? 'lot'} onChange={(e) => dispatch({ type: 'meta', patch: { areaKind: e.target.value as LotMap['areaKind'] } })}>
+              {AREA_KINDS.map((k) => (
+                <option key={k.kind} value={k.kind}>
+                  {k.icon} {k.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {areas.length > 1 && (
+            <div className="row-actions">
+              <button onClick={() => moveArea(-1)} disabled={areas[0]?.id === map.id}>
+                ← Move left
+              </button>
+              <button onClick={() => moveArea(1)} disabled={areas[areas.length - 1]?.id === map.id}>
+                Move right →
+              </button>
+            </div>
+          )}
+          <div className="row-actions">
+            {areas.length > 1 ? (
+              <button className="danger" onClick={deleteArea}>
+                🗑 Delete this area
+              </button>
+            ) : (
+              <small className="muted">A site needs at least one area. To remove it, delete the whole site.</small>
+            )}
+            <div className="grow" />
+            <button className="primary" onClick={() => setAreaMenu(false)}>
+              ✓ Done
+            </button>
+          </div>
+        </div>
+      )}
 
       <main>
         {canEdit && <Palette onAdd={(a) => addAsset(a)} open={panel === 'palette'} onClose={() => setPanel('none')} />}
@@ -604,7 +813,7 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
             <button className="zoom-step" onClick={() => zoomBy(1 / 1.25)} aria-label="Zoom out">
               −
             </button>
-            <button className="zoom-fit" onClick={fit} title={`Show the whole lot (now ${Math.round(view.z * 100)}%)`}>
+            <button className="zoom-fit" onClick={fit} title={`Show the whole area (now ${Math.round(view.z * 100)}%)`}>
               Show all
             </button>
             <button className="zoom-step" onClick={() => zoomBy(1.25)} aria-label="Zoom in">
@@ -625,7 +834,7 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
                 ＋ Add
               </button>
               <button className={panel === 'inspector' ? 'on' : ''} onClick={() => setPanel(panel === 'inspector' ? 'none' : 'inspector')}>
-                Lot and photo
+                Size and photo
               </button>
             </div>
           )}
@@ -676,7 +885,10 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
                 dispatch({ type: 'meta', patch: { backdrop: b ? { ...next, scale: b.scale, rotation: b.rotation, opacity: b.opacity } : next } });
                 setAlignOn(true);
               }}
-              onAddRow={() => addAsset(rowAsset)}
+              onAdd={(name) => {
+                const a = ASSETS.find((d) => d.name === name);
+                if (a) addAsset(a);
+              }}
               onClose={() => setGuideOn(false)}
             />
           )}
@@ -684,17 +896,17 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
             <GettingStarted
               company={account.companyName}
               onHide={hideSetup}
-              done="Your lot is drawn and your team can open it."
+              done="Your site is drawn and your team can open it."
               steps={[
                 {
-                  label: 'Draw your lot',
-                  hint: 'Start from a template, then move rows and spots to match your lot.',
+                  label: 'Draw your site',
+                  hint: 'Start from a ready-made site, then move things to match your real one.',
                   done: maps.length > 0,
-                  action: { label: 'Pick a map', run: () => setShowMaps(true) },
+                  action: { label: 'Pick a site', run: () => setShowMaps(true) },
                 },
                 {
                   label: 'Invite your team',
-                  hint: 'Text them a link. They join with one tap and see your maps.',
+                  hint: 'Text them a link. They join with one tap and see your sites.',
                   done: (account.teamSize ?? 1) > 1,
                   action: account.onTeam && { label: 'Invite', run: account.onTeam },
                 },
@@ -753,21 +965,30 @@ export default function App({ source, role, account, initialMaps, cacheKey }: Pr
       </main>
 
       {showMaps && (
-        <MapsDialog
-          maps={maps}
-          currentId={map.id}
-          onOpen={(m) => load(m, false)}
-          onTemplate={(t: Template) => (t.key === 'blank' ? startGuide(true) : load(instantiate(t), true))}
-          onGuide={() => startGuide(true)}
-          canEdit={canEdit}
-          onDelete={(m) => {
-            source.deleteMap(m.id).catch((e) => flash(friendlyError(e)));
-            const rest = maps.filter((x) => x.id !== m.id);
-            setMaps(rest);
-            if (m.id === map.id) load(rest[0] ?? instantiate(TEMPLATES[0]), false);
+        <SitesDialog
+          sites={sites.filter((x) => !pendingSites.current.has(x.id) || x.id === map.siteId)}
+          maps={areas.length ? [...maps.filter((m) => m.siteId !== map.siteId), ...areas] : maps}
+          currentSiteId={map.siteId}
+          onOpen={(x) => {
+            const first = x.id === map.siteId ? map : areasOf(maps, x.id)[0];
+            if (first) load(first, false);
+            else setShowMaps(false);
           }}
+          onTemplate={startSite}
+          onGuide={() => startGuide('site')}
+          onRename={renameSite}
+          onDelete={deleteSite}
+          canEdit={canEdit}
           onImport={importFile}
           onClose={() => setShowMaps(false)}
+        />
+      )}
+      {showAddArea && (
+        <AreaDialog
+          siteName={site?.name ?? 'this site'}
+          onPick={addArea}
+          onGuide={() => startGuide('area')}
+          onClose={() => setShowAddArea(false)}
         />
       )}
     </div>

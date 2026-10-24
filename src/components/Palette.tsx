@@ -5,7 +5,8 @@ import { SheetHandle } from './SheetHandle';
 function previewItem(a: AssetDef): MapItem {
   const base: MapItem = { id: 'preview', kind: a.kind, x: 0, y: 0, w: a.w, h: a.h, rotation: 0, ...a.defaults };
   if (a.kind === 'spaceRow') return { ...base, w: 150, h: 60, count: 4, prefix: '' };
-  if (a.kind === 'wall' || a.kind === 'laneLine' || a.kind === 'curb') return { ...base, w: 120 };
+  if (a.kind === 'wall' || a.kind === 'laneLine' || a.kind === 'curb' || a.kind === 'fence') return { ...base, w: 120 };
+  if (a.kind === 'stage' || a.kind === 'loadingDock') return { ...base, w: 150, h: 100, label: '' };
   if (a.kind === 'label') return { ...base, label: 'Aa', fontSize: 40 };
   if (a.kind === 'zone') return { ...base, w: 140, h: 100, label: '' };
   if (a.kind === 'building') return { ...base, w: 150, h: 110, label: '' };
@@ -26,6 +27,7 @@ function Preview({ a }: { a: AssetDef }) {
 
 export function Palette({ onAdd, open, onClose }: { onAdd: (a: AssetDef) => void; open: boolean; onClose: () => void }) {
   const groups = [
+    ['Site', 'Site: gates, signs, first aid'],
     ['Parking', 'Parking'],
     ['Structure', 'Buildings and walls'],
     ['Nature', 'Trees and plants'],

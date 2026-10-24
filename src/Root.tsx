@@ -17,7 +17,8 @@ import {
   team,
   type Membership,
 } from './data/supabase';
-import type { LotMap } from './types';
+import type { LotMap, Site } from './types';
+import { adoptOrphans } from './sites';
 import { Loading } from './components/Loading';
 
 // opened now and then: loaded the first time they're needed
@@ -73,7 +74,8 @@ function Workspace({
   account?: React.ComponentProps<typeof App>['account'];
   cacheKey?: string;
 }) {
-  const [maps, setMaps] = useState<LotMap[] | null>(null);
+  const [data, setData] = useState<{ sites: Site[]; maps: LotMap[] } | null>(null);
+  const maps = data?.maps;
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -82,21 +84,30 @@ function Workspace({
     // the app catches up by itself once it reconnects
     const saved = cacheKey ? loadCachedMaps(cacheKey) : null;
     let shown = false;
-    const show = (m: LotMap[]) => {
+    const show = (sites: Site[], m: LotMap[]) => {
       if (shown) return;
       shown = true;
-      setMaps(m);
+      // maps from before sites (or from an older app) are put into sites
+      const adopted = adoptOrphans(sites, m);
+      if (adopted.maps.length && canEditMaps(role)) {
+        Promise.all(adopted.sites.map((x) => source.saveSite(x)))
+          .then(() => Promise.all(adopted.maps.map((x) => source.saveMap(x, x.version))))
+          .catch(() => {
+            // tried again next time the app opens
+          });
+      }
+      const moved = new Map(adopted.maps.map((x) => [x.id, x]));
+      setData({ sites: [...sites, ...adopted.sites], maps: m.map((x) => moved.get(x.id) ?? x) });
     };
-    const fallback = window.setTimeout(() => saved && show(saved.maps), navigator.onLine ? 4000 : 0);
-    source
-      .listMaps()
-      .then(show)
+    const fallback = window.setTimeout(() => saved && show(saved.sites ?? [], saved.maps), navigator.onLine ? 4000 : 0);
+    Promise.all([source.listSites(), source.listMaps()])
+      .then(([s, m]) => show(s, m))
       .catch((e) => {
-        if (saved && isNetworkError(e)) show(saved.maps);
+        if (saved && isNetworkError(e)) show(saved.sites ?? [], saved.maps);
         else if (!shown) setError(friendlyError(e));
       })
       .finally(() => window.clearTimeout(fallback));
-  }, [source, cacheKey]);
+  }, [source, cacheKey, role]);
   useEffect(load, [load]);
 
   // viewers wait for a map; pick up the first one as soon as it's published
@@ -124,16 +135,16 @@ function Workspace({
       <div className="screen">
         <div className="screen-card">
           <span className="logo big">V</span>
-          <h1>No lot maps yet</h1>
+          <h1>No site maps yet</h1>
           <p className="muted">
-            An admin or manager at {account?.companyName ?? 'your company'} needs to build the first map. It will show up here
+            An admin or manager at {account?.companyName ?? 'your company'} needs to build the first site. It will show up here
             automatically.
           </p>
           {account && <button onClick={account.onSignOut}>Sign out</button>}
         </div>
       </div>
     );
-  return <App source={source} role={role} account={account} initialMaps={maps} cacheKey={cacheKey} />;
+  return <App source={source} role={role} account={account} initialMaps={maps} initialSites={data!.sites} cacheKey={cacheKey} />;
 }
 
 type AuthMode = 'in' | 'up' | 'forgot';
@@ -348,9 +359,9 @@ function Onboarding({
                 <span className="muted small">I have an invite link or code from my admin.</span>
               </button>
               <button className="choice-tile" onClick={() => setPath('start')}>
-                <span className="choice-icon" aria-hidden="true">🅿️</span>
+                <span className="choice-icon" aria-hidden="true">🗺️</span>
                 <b>Start a company</b>
-                <span className="muted small">Draw your lots and share them with your team.</span>
+                <span className="muted small">Map your sites and share them with your team.</span>
               </button>
             </div>
           </>

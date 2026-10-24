@@ -168,10 +168,10 @@ export function Inspector(p: Props) {
     return (
       <aside className={`inspector ${p.open ? 'open' : ''}`}>
         <SheetHandle onClose={p.onClose} />
-        <h2>Your lot</h2>
+        <h2>This area</h2>
         <label className="field">
-          <span>Lot name</span>
-          <input value={map.name} placeholder="Example: Front lot" onChange={(e) => p.onMeta({ name: e.target.value })} />
+          <span>Area name</span>
+          <input value={map.name} placeholder="Example: Front lawn" onChange={(e) => p.onMeta({ name: e.target.value })} />
         </label>
         <SatellitePanel map={map} onChange={(backdrop) => p.onMeta({ backdrop })} onAlign={p.onAlign} />
         <div className="field">
@@ -191,7 +191,7 @@ export function Inspector(p: Props) {
         </div>
         <div className="stats">
           <div>
-            <b>{p.spotCount}</b> parking spots
+            <b>{p.spotCount}</b> numbered spaces
           </div>
           <div>
             <b>{map.items.length}</b> things on the map
@@ -200,13 +200,13 @@ export function Inspector(p: Props) {
         {p.duplicates.length > 0 && (
           <p className="warn">
             Some spot numbers are used twice: {p.duplicates.slice(0, 8).join(', ')}
-            {p.duplicates.length > 8 ? '…' : ''}. Give those rows different letters so valets can tell them apart.
+            {p.duplicates.length > 8 ? '…' : ''}. Give those rows different letters so people can tell them apart.
           </p>
         )}
         <details className="more">
           <summary>More options</summary>
           <p className="hint lot-hint">
-            <i className="lot-swatch" /> To make the lot bigger or smaller, drag the orange handles on its edges. It also grows by itself
+            <i className="lot-swatch" /> To make the area bigger or smaller, drag the orange handles on its edges. It also grows by itself
             when you put something past the edge.
           </p>
           <div className="row2">
@@ -214,7 +214,7 @@ export function Inspector(p: Props) {
             <NumberField label="Height" value={map.height} min={100} onChange={(v) => p.onMeta({ height: v })} />
           </div>
           <button className="fit-lot" onClick={p.onFitLot} disabled={!map.items.length}>
-            Shrink the lot to fit what's on it
+            Shrink the area to fit what's on it
           </button>
           <label className="field check">
             <input type="checkbox" checked={p.showGrid} onChange={(e) => p.onShowGrid(e.target.checked)} />

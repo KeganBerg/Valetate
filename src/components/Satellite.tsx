@@ -91,8 +91,8 @@ export function PlaceSearch({ onPick, autoFocus, children }: { onPick: (p: Place
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Venue name or address"
-          aria-label="Venue name or address"
+          placeholder="Place name or address"
+          aria-label="Place name or address"
           enterKeyHint="search"
           autoFocus={autoFocus}
         />
@@ -145,7 +145,7 @@ export function SatellitePanel({
   if (b && !picking) {
     return (
       <div className="field satellite-panel">
-        <span>Photo of your real lot</span>
+        <span>Photo of the real place</span>
         <p className="sat-place" title={b.place}>
           {b.place || 'Placed on the map'}
         </p>
@@ -182,8 +182,8 @@ export function SatellitePanel({
 
   return (
     <div className="field satellite-panel">
-      <span>Photo of your real lot</span>
-      {!b && <p className="hint">Put a satellite photo of your lot under the map, then trace your rows right on top of it.</p>}
+      <span>Photo of the real place</span>
+      {!b && <p className="hint">Put a satellite photo of this place under the map, then trace right on top of it.</p>}
       <PlaceSearch onPick={place} autoFocus={picking}>
         {picking && <button onClick={() => setPicking(false)}>Cancel</button>}
       </PlaceSearch>
@@ -198,7 +198,7 @@ export function AlignBar({ backdrop: b, onChange, onDone }: { backdrop: MapBackd
   return (
     <div className="align-bar" role="dialog" aria-label="Line up the satellite photo">
       <div className="align-head">
-        <p>Drag the photo with your finger or mouse until it lines up with your lot. Tap Done when it looks right.</p>
+        <p>Drag the photo with your finger or mouse until it lines up with your map. Tap Done when it looks right.</p>
         <button onClick={() => onChange({ ...b, scale: UNITS_PER_METER, rotation: 0 })}>Reset</button>
         <button className="primary" onClick={onDone}>
           Done

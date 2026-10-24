@@ -18,7 +18,21 @@ export type AssetKind =
   | 'laneLine'
   | 'curb'
   | 'zone'
-  | 'label';
+  | 'label'
+  // site pieces
+  | 'entrance'
+  | 'exit'
+  | 'gate'
+  | 'fence'
+  | 'stage'
+  | 'tent'
+  | 'toilets'
+  | 'firstAid'
+  | 'assembly'
+  | 'info'
+  | 'loadingDock'
+  | 'extinguisher'
+  | 'north';
 
 /**
  * Every object on a map is an axis-aligned box (x, y, w, h) rotated by
@@ -48,9 +62,30 @@ export interface MapItem {
   reverse?: boolean;
 }
 
+/** What kind of place an area is; picks its starting template and icon. */
+export type AreaKind = 'overview' | 'outdoor' | 'lot' | 'garage' | 'floor';
+
+/**
+ * One property or grounds: a venue, an event, a campus, a garage.
+ * Its areas are the maps whose `siteId` is the site's id.
+ */
+export interface Site {
+  id: string;
+  name: string;
+  /** street address, shown under the name */
+  address?: string;
+  updatedAt: number;
+}
+
+/** One area of a site: an overview, an outdoor area, a lot, a garage level or a floor. */
 export interface LotMap {
   id: string;
   name: string;
+  /** the site this area belongs to (absent only on maps from before sites) */
+  siteId?: string;
+  areaKind?: AreaKind;
+  /** order of the area's tab inside its site */
+  position?: number;
   width: number;
   height: number;
   /** ground color of the lot (asphalt, concrete...) */

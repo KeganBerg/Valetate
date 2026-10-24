@@ -1,7 +1,8 @@
-import type { LotMap } from './types';
+import type { LotMap, Site } from './types';
 
 const MAPS_KEY = 'valetate.maps.v1';
 const CURRENT_KEY = 'valetate.currentMap.v1';
+const SITES_KEY = 'valetate.sites.v1';
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -55,5 +56,26 @@ export function isLotMap(v: unknown): v is LotMap {
     typeof m.width === 'number' &&
     typeof m.height === 'number' &&
     Array.isArray(m.items)
+  );
+}
+
+export function loadSites(): Site[] {
+  const sites = read<Site[]>(SITES_KEY, []);
+  return Array.isArray(sites) ? sites.filter((s) => s && typeof s.id === 'string' && typeof s.name === 'string') : [];
+}
+
+export function saveSite(site: Site) {
+  write(SITES_KEY, [site, ...loadSites().filter((s) => s.id !== site.id)]);
+}
+
+/** removes the site and its areas */
+export function deleteSite(id: string) {
+  write(
+    SITES_KEY,
+    loadSites().filter((s) => s.id !== id),
+  );
+  write(
+    MAPS_KEY,
+    loadMaps().filter((m) => m.siteId !== id),
   );
 }

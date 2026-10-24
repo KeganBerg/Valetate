@@ -5,7 +5,7 @@ import { rowNumbers } from './geometry';
 export interface AssetDef {
   kind: AssetKind;
   name: string;
-  category: 'Parking' | 'Structure' | 'Nature' | 'Markings';
+  category: 'Site' | 'Parking' | 'Structure' | 'Nature' | 'Markings';
   /** default box size */
   w: number;
   h: number;
@@ -130,7 +130,7 @@ export const ASSETS: AssetDef[] = [
     category: 'Markings',
     w: 300,
     h: 200,
-    defaults: { label: 'Overflow', color: '#39d353' },
+    defaults: { label: 'Area 1', color: '#39d353' },
     hasLabel: true,
     hasColor: true,
     hint: 'A highlighted area such as "Back Lot" or "VIP".',
@@ -145,6 +145,20 @@ export const ASSETS: AssetDef[] = [
     hasLabel: true,
     hasColor: true,
   },
+  // ---------- site pieces: what event plans and evacuation maps mark ----------
+  { kind: 'entrance', name: 'Entrance', category: 'Site', w: 130, h: 44, defaults: { label: 'ENTRANCE', color: '#2e9e44' }, hasLabel: true, hasColor: true },
+  { kind: 'exit', name: 'Exit', category: 'Site', w: 100, h: 44, defaults: { label: 'EXIT', color: '#d93636' }, hasLabel: true, hasColor: true },
+  { kind: 'gate', name: 'Gate', category: 'Site', w: 140, h: 30, defaults: { label: 'Gate 1', color: '#f2c94c' }, hasLabel: true, hasColor: true },
+  { kind: 'fence', name: 'Fence', category: 'Site', w: 300, h: 12, defaults: { color: '#cfd3d8' }, hasColor: true },
+  { kind: 'stage', name: 'Stage', category: 'Site', w: 260, h: 150, defaults: { label: 'Main stage', color: '#2a2d33' }, hasLabel: true, hasColor: true },
+  { kind: 'tent', name: 'Tent', category: 'Site', w: 120, h: 120, defaults: { label: '', color: '#f5f5f2' }, hasLabel: true, hasColor: true },
+  { kind: 'toilets', name: 'Toilets', category: 'Site', w: 56, h: 56, defaults: { color: '#2f6fdb' }, hasColor: true },
+  { kind: 'firstAid', name: 'First aid', category: 'Site', w: 56, h: 56, defaults: { color: '#1f8a4c' } },
+  { kind: 'assembly', name: 'Assembly point', category: 'Site', w: 64, h: 64, defaults: { color: '#1f8a4c' } },
+  { kind: 'info', name: 'Info point', category: 'Site', w: 52, h: 52, defaults: { color: '#2f6fdb' }, hasColor: true },
+  { kind: 'loadingDock', name: 'Loading dock', category: 'Site', w: 180, h: 90, defaults: { label: 'LOADING DOCK' }, hasLabel: true },
+  { kind: 'extinguisher', name: 'Fire extinguisher', category: 'Site', w: 40, h: 40 },
+  { kind: 'north', name: 'North arrow', category: 'Site', w: 56, h: 80 },
 ];
 
 export function assetFor(it: Pick<MapItem, 'kind' | 'accessible'>): AssetDef {
@@ -546,6 +560,188 @@ export function renderAsset(it: MapItem): ReactNode {
               {it.label}
             </Upright>
           )}
+        </g>
+      );
+
+    case 'entrance':
+    case 'exit': {
+      const t = it.label || (it.kind === 'exit' ? 'EXIT' : 'ENTRANCE');
+      return (
+        <g>
+          <rect x={x0 + 2} y={y0 + 3} width={w} height={h} rx={h * 0.22} fill="#000" opacity={0.25} />
+          <rect x={x0} y={y0} width={w} height={h} rx={h * 0.22} fill={color} stroke="#fff" strokeWidth={2} />
+          <path d={arrowPath(h * 0.42, h * 0.62)} transform={`translate(${x0 + h * 0.42} 0) rotate(${it.kind === 'exit' ? -90 : 90})`} fill="#fff" />
+          <Upright x={h * 0.3} rot={rot} size={fitText(t, w - h * 0.9, h, h * 0.45)} fill="#fff" weight={800}>
+            {t}
+          </Upright>
+        </g>
+      );
+    }
+
+    case 'gate': {
+      const post = Math.min(h, 16);
+      return (
+        <g>
+          <line x1={x0 + post} y1={0} x2={w / 2 - post} y2={-h * 0.35} stroke={color} strokeWidth={Math.max(3, h * 0.18)} strokeLinecap="round" />
+          <rect x={x0} y={-post / 2} width={post} height={post} fill="#2a2d33" stroke="#fff" strokeWidth={1.5} />
+          <rect x={w / 2 - post} y={-post / 2} width={post} height={post} fill="#2a2d33" stroke="#fff" strokeWidth={1.5} />
+          {it.label && (
+            <Upright y={h * 0.25 + 4} rot={rot} size={fitText(it.label, w * 0.8, h, 15)} fill="#fff" weight={700} outline="#0009">
+              {it.label}
+            </Upright>
+          )}
+        </g>
+      );
+    }
+
+    case 'fence': {
+      const n = Math.max(2, Math.round(w / 30));
+      return (
+        <g>
+          <line x1={x0} y1={0} x2={-x0} y2={0} stroke={color} strokeWidth={Math.max(2, h * 0.3)} />
+          {Array.from({ length: n + 1 }, (_, i) => (
+            <rect key={i} x={x0 + (i * w) / n - h / 3} y={-h / 2} width={(h * 2) / 3} height={h} fill={color} stroke="#1f2328" strokeWidth={1} />
+          ))}
+        </g>
+      );
+    }
+
+    case 'stage': {
+      const apron = Math.min(h * 0.22, 34);
+      return (
+        <g>
+          <rect x={x0 + 4} y={y0 + 6} width={w} height={h} fill="#000" opacity={0.25} />
+          <rect x={x0} y={y0} width={w} height={h - apron} fill={color} stroke="#000" strokeWidth={2} />
+          <path d={`M${x0} ${h / 2 - apron} L${-x0} ${h / 2 - apron} L${-x0 - w * 0.08} ${h / 2} L${x0 + w * 0.08} ${h / 2} Z`} fill="#4a4f57" stroke="#000" strokeWidth={2} />
+          {it.label && (
+            <Upright y={-apron / 2} rot={rot} size={fitText(it.label, w * 0.8, h * 0.5, 28)} fill={isLight(color) ? '#1f2328' : '#fff'} weight={800}>
+              {it.label}
+            </Upright>
+          )}
+        </g>
+      );
+    }
+
+    case 'tent':
+      return (
+        <g>
+          <rect x={x0 + 3} y={y0 + 5} width={w} height={h} fill="#000" opacity={0.22} />
+          <rect x={x0} y={y0} width={w} height={h} fill={color} stroke="#9aa0a8" strokeWidth={2} />
+          <path d={`M${x0} ${y0} L${-x0} ${-y0} M${-x0} ${y0} L${x0} ${-y0}`} stroke="#9aa0a8" strokeWidth={1.5} />
+          {it.label && (
+            <g>
+              <rect x={x0 + 6} y={-12} width={w - 12} height={24} rx={4} fill="#fff" opacity={0.9} />
+              <Upright rot={rot} size={fitText(it.label, w - 16, 22, 15)} fill="#1f2328" weight={700}>
+                {it.label}
+              </Upright>
+            </g>
+          )}
+        </g>
+      );
+
+    case 'toilets':
+    case 'firstAid':
+    case 'assembly':
+    case 'info':
+    case 'extinguisher': {
+      const s = Math.min(w, h);
+      const r = s * 0.16;
+      const bg = it.kind === 'extinguisher' ? '#d93636' : color;
+      const fg = '#fff';
+      let glyph: ReactNode;
+      if (it.kind === 'firstAid') {
+        const a = s * 0.13;
+        const b = s * 0.36;
+        glyph = <path d={`M${-a} ${-b} H${a} V${-a} H${b} V${a} H${a} V${b} H${-a} V${a} H${-b} V${-a} H${-a} Z`} fill={fg} />;
+      } else if (it.kind === 'info') {
+        glyph = (
+          <g>
+            <circle cy={-s * 0.2} r={s * 0.07} fill={fg} />
+            <rect x={-s * 0.06} y={-s * 0.06} width={s * 0.12} height={s * 0.34} rx={s * 0.03} fill={fg} />
+          </g>
+        );
+      } else if (it.kind === 'assembly') {
+        // four people gathered at the middle, arrows pointing in
+        glyph = (
+          <g>
+            {[0, 90, 180, 270].map((a) => (
+              <g key={a} transform={`rotate(${a})`}>
+                <circle cx={0} cy={-s * 0.13} r={s * 0.05} fill={fg} />
+                <path d={`M0 ${-s * 0.24} L${-s * 0.07} ${-s * 0.34} L${s * 0.07} ${-s * 0.34} Z`} fill={fg} />
+              </g>
+            ))}
+          </g>
+        );
+      } else if (it.kind === 'extinguisher') {
+        glyph = (
+          <g>
+            <rect x={-s * 0.13} y={-s * 0.18} width={s * 0.26} height={s * 0.5} rx={s * 0.08} fill={fg} />
+            <path d={`M0 ${-s * 0.18} V${-s * 0.3} H${s * 0.2}`} stroke={fg} strokeWidth={s * 0.06} fill="none" />
+          </g>
+        );
+      } else {
+        // toilets: a man and a woman
+        const p = (dx: number, skirt: boolean) => (
+          <g transform={`translate(${dx} 0)`}>
+            <circle cy={-s * 0.24} r={s * 0.07} fill={fg} />
+            {skirt ? (
+              <path d={`M${-s * 0.06} ${-s * 0.14} H${s * 0.06} L${s * 0.13} ${s * 0.14} H${-s * 0.13} Z M${-s * 0.06} ${s * 0.14} V${s * 0.32} M${s * 0.06} ${s * 0.14} V${s * 0.32}`} fill={fg} stroke={fg} strokeWidth={s * 0.05} />
+            ) : (
+              <rect x={-s * 0.08} y={-s * 0.14} width={s * 0.16} height={s * 0.46} rx={s * 0.03} fill={fg} />
+            )}
+          </g>
+        );
+        glyph = (
+          <g>
+            {p(-s * 0.17, false)}
+            <line x1={0} y1={-s * 0.34} x2={0} y2={s * 0.34} stroke={fg} strokeWidth={s * 0.03} />
+            {p(s * 0.17, true)}
+          </g>
+        );
+      }
+      return (
+        <g>
+          <rect x={-s / 2 + 2} y={-s / 2 + 3} width={s} height={s} rx={it.kind === 'info' ? s / 2 : r} fill="#000" opacity={0.25} />
+          <rect x={-s / 2} y={-s / 2} width={s} height={s} rx={it.kind === 'info' ? s / 2 : r} fill={bg} stroke="#fff" strokeWidth={2} />
+          <g transform={`rotate(${-rot})`}>{glyph}</g>
+        </g>
+      );
+    }
+
+    case 'loadingDock': {
+      const stripes = Math.max(3, Math.round(w / 28));
+      return (
+        <g>
+          <clipPath id={`dock-${it.id}`}>
+            <rect x={x0} y={y0} width={w} height={h} />
+          </clipPath>
+          <rect x={x0} y={y0} width={w} height={h} fill="#f2c94c" />
+          <g clipPath={`url(#dock-${it.id})`}>
+            {Array.from({ length: stripes * 2 }, (_, i) => (
+              <path key={i} d={`M${x0 + i * 28 - h} ${-y0} L${x0 + i * 28} ${y0} L${x0 + i * 28 + 12} ${y0} L${x0 + i * 28 - h + 12} ${-y0} Z`} fill="#1f2328" />
+            ))}
+          </g>
+          <rect x={x0} y={y0} width={w} height={h} fill="none" stroke="#1f2328" strokeWidth={3} />
+          {it.label && (
+            <g>
+              <rect x={x0 + 8} y={-14} width={w - 16} height={28} rx={4} fill="#1f2328" />
+              <Upright rot={rot} size={fitText(it.label, w - 24, 24, 16)} fill="#fff" weight={800}>
+                {it.label}
+              </Upright>
+            </g>
+          )}
+        </g>
+      );
+    }
+
+    case 'north':
+      return (
+        <g>
+          <circle r={Math.min(w, h) * 0.42} cy={h * 0.08} fill="#fff" opacity={0.85} stroke="#1f2328" strokeWidth={2} />
+          <path d={`M0 ${y0 + h * 0.12} L${w * 0.2} ${h * 0.3} L0 ${h * 0.18} L${-w * 0.2} ${h * 0.3} Z`} fill="#1f2328" />
+          <text y={y0 + h * 0.08} textAnchor="middle" dominantBaseline="central" fontSize={h * 0.2} fontWeight={800} fill="#1f2328" stroke="#fff" strokeWidth={3} paintOrder="stroke">
+            N
+          </text>
         </g>
       );
 
