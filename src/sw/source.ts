@@ -53,7 +53,7 @@ self.addEventListener('fetch', (event) => {
       (hit) =>
         hit ||
         fetch(req).then((res) => {
-          if (res.ok && (url.pathname.includes('/assets/') || url.pathname.includes('/ocr/'))) {
+          if (res.ok && (url.pathname.includes('/assets/'))) {
             const copy = res.clone();
             caches.open(CACHE).then((c) => c.put(req, copy));
           }

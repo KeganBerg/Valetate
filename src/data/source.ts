@@ -1,30 +1,21 @@
-import type { Payment, Rates, Validation } from '../payments';
-import type { CarPhoto, CarRequest, Feedback, Incident, LotEvent, PlateHistory, VehicleProfile, LotMap, ParkedCar, PhotoSide, Shift, Tip } from '../types';
-import type { Outbox } from './outbox';
-import type { ReportData } from '../report';
-
-export type CarDetails = Partial<
-  Pick<ParkedCar, 'plate' | 'color' | 'make' | 'vehicle' | 'ownerName' | 'ownerPhone' | 'ticket' | 'notes' | 'keySlot'>
->;
+import type { LotMap } from '../types';
 
 export type Role = 'admin' | 'manager' | 'valet';
 
 export const ROLE_INFO: Record<Role, { name: string; can: string }> = {
-  admin: { name: 'Admin', can: 'Manages the team, builds maps, parks cars' },
-  manager: { name: 'Manager', can: 'Builds and edits maps, parks cars' },
-  valet: { name: 'Valet', can: 'Sees the live lot, parks and retrieves cars' },
+  admin: { name: 'Admin', can: 'Manages the team and builds maps' },
+  manager: { name: 'Manager', can: 'Builds and edits maps' },
+  valet: { name: 'Viewer', can: 'Sees the maps' },
 };
 
 export const canEditMaps = (r: Role) => r === 'admin' || r === 'manager';
 
 /**
- * Where maps and cars live. `local` keeps everything in this browser;
+ * Where maps live. `local` keeps them in this browser;
  * `cloud` is a company's shared Supabase data.
  */
 export interface DataSource {
   kind: 'local' | 'cloud';
-  /** car changes waiting for signal (cloud only) */
-  outbox?: Outbox;
   listMaps(): Promise<LotMap[]>;
   /**
    * Saves over `baseVersion` (the version this device last saw; none for a new
@@ -33,99 +24,11 @@ export interface DataSource {
    */
   saveMap(map: LotMap, baseVersion?: number): Promise<number | undefined>;
   deleteMap(id: string): Promise<void>;
-  /** cars currently parked */
-  listCars(): Promise<ParkedCar[]>;
-  parkCar(car: ParkedCar): Promise<void>;
-  moveCar(id: string, spotKey: string, spotLabel: string): Promise<void>;
-  /** fill in details after a fast check-in */
-  updateCar(id: string, patch: CarDetails): Promise<void>;
-  /** take a car's keys off the board (they're with me now), or hang them back */
-  setKeys(id: string, out: boolean): Promise<void>;
-  /** which parked cars this one blocks in */
-  setBlocks(id: string, blocks: string[]): Promise<void>;
-  /** the car left the lot; any request for it is finished too */
-  retrieveCar(id: string): Promise<void>;
-  /** who is using this device, for claiming requests */
-  me: { id: string; name: string };
-  /** requests that are open, claimed or ready */
-  listRequests(): Promise<CarRequest[]>;
-  createRequest(r: CarRequest): Promise<void>;
-  /** fails if someone else claimed it first */
-  claimRequest(id: string): Promise<void>;
-  unclaimRequest(id: string): Promise<void>;
-  /** the car is at the stand; the guest's page says so */
-  markReady(id: string): Promise<void>;
-  cancelRequest(id: string): Promise<void>;
-  /** walkaround photos for a car, oldest first */
-  listPhotos(carId: string): Promise<CarPhoto[]>;
-  /** store an already-shrunk JPEG; `id` is chosen by the caller so a retry can't duplicate it */
-  addPhoto(photo: { id: string; car: ParkedCar; side: PhotoSide; blob: Blob; takenAt: number }): Promise<CarPhoto>;
-  setPhotoDamage(id: string, damage: boolean): Promise<void>;
-  /** the event running now, if any */
-  getEvent(): Promise<LotEvent | null>;
-  startEvent(e: LotEvent): Promise<void>;
-  updateEvent(id: string, patch: Pick<LotEvent, 'name' | 'letOutAt'>): Promise<void>;
-  endEvent(id: string): Promise<void>;
-  /** cars that left the lot since `since`, for the let-out pace */
-  carsOutSince(since: number): Promise<number>;
-  /** shifts that were open at any point since `since` */
-  listShifts(since: number): Promise<Shift[]>;
-  clockIn(shift: Shift): Promise<void>;
-  /** end a shift (mine, or a manager ending someone's) with a note for the next crew */
-  clockOut(id: string, handoffNote: string): Promise<void>;
-  /** tips logged since `since`, voided ones left out */
-  listTips(since: number): Promise<Tip[]>;
-  addTip(tip: Tip): Promise<void>;
-  voidTip(id: string): Promise<void>;
-  /** the guests' digital tip link (Venmo, Cash App…); admins set it */
-  getTipUrl(): Promise<string>;
-  setTipUrl(url: string): Promise<void>;
-  /** incident reports: all open ones and those resolved in the last 30 days */
-  listIncidents(): Promise<Incident[]>;
-  /** file a report; `photos` are already-shrunk JPEGs whose ids are chosen by the caller */
-  reportIncident(incident: Incident, photos: { id: string; blob: Blob }[]): Promise<void>;
-  /** managers: close it with what was done, or reopen it */
-  resolveIncident(id: string, resolution: string, reopen?: boolean): Promise<void>;
-  /** something the browser can show for each of a report's photos */
-  incidentPhotos(incident: Incident): Promise<string[]>;
-  /** what the stand knows about a plate (profile, past visits, damage, incidents); null if too short or offline */
-  lookupPlate(plate: string): Promise<PlateHistory | null>;
-  /** save a guest profile: monthly, hotel room, preferences… */
-  saveVehicle(profile: VehicleProfile): Promise<void>;
-  /** what the stand charges; admins set it */
-  getRates(): Promise<Rates>;
-  setRates(rates: Rates): Promise<void>;
-  /** validation codes, retired ones included */
-  listValidations(): Promise<Validation[]>;
-  /** add or change one (managers and admins) */
-  saveValidation(v: Validation): Promise<void>;
-  /** payments since `since`, voided ones included */
-  listPayments(since: number): Promise<Payment[]>;
-  takePayment(payment: Payment): Promise<void>;
-  /** managers: undo a payment taken by mistake */
-  voidPayment(id: string): Promise<void>;
-  /** cars, requests, tips and shifts since `since`, for the manager dashboard */
-  reportData(since: number): Promise<ReportData>;
-  /** put a car marked retrieved by mistake back on its spot */
-  unretrieveCar(car: ParkedCar): Promise<void>;
   /**
-   * called when another device changes maps, cars or requests; `live` reports whether
+   * called when another device changes a map; `live` reports whether
    * changes are arriving (false while the connection is down)
    */
-  subscribe(on: {
-    maps: () => void;
-    cars: () => void;
-    requests?: () => void;
-    event?: () => void;
-    /** shifts or tips changed */
-    team?: () => void;
-    incidents?: () => void;
-    /** a guest just rated a visit (managers and admins only) */
-    feedback?: (f: Feedback) => void;
-    /** payments, validation codes or rates changed */
-    payments?: () => void;
-    live?: (live: boolean) => void;
-  }): () => void;
+  subscribe(on: { maps: () => void; live?: (live: boolean) => void }): () => void;
 }
 
 /** Someone else saved (or deleted) the map since this device last saw it. */
