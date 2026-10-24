@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type Dispatch } from 'react';
 import { GRID, LOT_MIN, center, itemBounds, lotAround, normalizeAngle, rotatePt, snap, toLocal } from '../geometry';
 import type { Action, Snapshot } from '../store';
-import type { LotMap, MapItem, Spot } from '../types';
+import type { LotMap, MapBackdrop, MapItem, Spot } from '../types';
+import { SatelliteLayer } from './Satellite';
+import { shiftBackdrop } from '../backdrop';
 import { FONT, MapItems } from './MapSvg';
 
 export interface View {
@@ -22,7 +24,9 @@ type Drag =
   | { mode: 'marquee'; wx: number; wy: number; cur: { x: number; y: number }; additive: string[] }
   | { mode: 'pinch'; d0: number; z0: number; world: { x: number; y: number } }
   /** dragging an edge or corner of the lot itself */
-  | { mode: 'lot'; sx: -1 | 0 | 1; sy: -1 | 0 | 1; snapshot: Snapshot; view: View };
+  | { mode: 'lot'; sx: -1 | 0 | 1; sy: -1 | 0 | 1; snapshot: Snapshot; view: View }
+  /** sliding the satellite photo under the drawing */
+  | { mode: 'photo'; sx: number; sy: number; orig: MapBackdrop };
 
 type Side = -1 | 0 | 1;
 const LOT_HANDLES: [Side, Side][] = [
@@ -58,6 +62,8 @@ interface Props {
   onDropAsset: (assetName: string, wx: number, wy: number) => void;
   /** people who can't edit: pan and zoom only */
   readOnly?: boolean;
+  /** dragging slides the satellite photo instead of panning */
+  aligning?: boolean;
 }
 
 const clampZ = (z: number) => Math.min(MAX_Z, Math.max(MIN_Z, z));
@@ -73,6 +79,7 @@ export function Canvas({
   highlight,
   onDropAsset,
   readOnly = false,
+  aligning = false,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<Drag | null>(null);
@@ -80,7 +87,7 @@ export function Canvas({
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [lotDrag, setLotDrag] = useState(false);
   const items = map.items;
-  const snapshotNow = (): Snapshot => ({ items, width: map.width, height: map.height });
+  const snapshotNow = (): Snapshot => ({ items, width: map.width, height: map.height, backdrop: map.backdrop });
 
   const screen = (e: { clientX: number; clientY: number }) => {
     const r = svgRef.current!.getBoundingClientRect();
@@ -118,7 +125,7 @@ export function Canvas({
       dispatch({ type: 'preview', items: d.snapshot });
     }
     if (d?.mode === 'lot') {
-      dispatch({ type: 'preview', items: d.snapshot.items, size: d.snapshot });
+      dispatch({ type: 'preview', items: d.snapshot.items, size: d.snapshot, backdrop: d.snapshot.backdrop });
       setLotDrag(false);
     }
     setMarquee(null);
@@ -134,6 +141,10 @@ export function Canvas({
     if (pointers.current.size > 2) return;
 
     const w = toWorldPt(p.x, p.y);
+    if (aligning && map.backdrop && !readOnly) {
+      drag.current = { mode: 'photo', sx: p.x, sy: p.y, orig: map.backdrop };
+      return;
+    }
     if (readOnly) {
       drag.current = { mode: 'pan', sx: p.x, sy: p.y, view };
       return;
@@ -201,6 +212,11 @@ export function Canvas({
       setView({ ...d.view, x: d.view.x + p.x - d.sx, y: d.view.y + p.y - d.sy });
       return;
     }
+    if (d.mode === 'photo') {
+      const backdrop = { ...d.orig, x: d.orig.x + (p.x - d.sx) / view.z, y: d.orig.y + (p.y - d.sy) / view.z };
+      dispatch({ type: 'meta', patch: { backdrop } });
+      return;
+    }
 
     if (d.mode === 'lot') {
       // work in the coordinates the drag started in, since the view shifts as the lot grows up/left
@@ -227,6 +243,7 @@ export function Canvas({
         type: 'preview',
         items: dx || dy ? o.items.map((it) => ({ ...it, x: it.x + dx, y: it.y + dy })) : o.items,
         size: { width, height },
+        backdrop: shiftBackdrop(o.backdrop, dx, dy),
       });
       setView({ ...d.view, x: d.view.x - dx * d.view.z, y: d.view.y - dy * d.view.z });
       return;
@@ -296,10 +313,10 @@ export function Canvas({
         // the lot grows to keep whatever was dragged past its edge
         const grown = lotAround(items, map.width, map.height);
         if (grown) {
-          dispatch({ type: 'preview', items: grown.items, size: grown });
+          dispatch({ type: 'preview', items: grown.items, size: grown, backdrop: shiftBackdrop(map.backdrop, grown.dx, grown.dy) });
           setView((v) => ({ ...v, x: v.x - grown.dx * v.z, y: v.y - grown.dy * v.z }));
         }
-        dispatch({ type: 'pushHistory', snapshot: { items: d.snapshot, width: map.width, height: map.height } });
+        dispatch({ type: 'pushHistory', snapshot: { items: d.snapshot, width: map.width, height: map.height, backdrop: map.backdrop } });
       }
     } else if (d.mode === 'marquee') {
       const m = { x: Math.min(d.wx, d.cur.x), y: Math.min(d.wy, d.cur.y), r: Math.max(d.wx, d.cur.x), b: Math.max(d.wy, d.cur.y) };
@@ -331,7 +348,7 @@ export function Canvas({
   return (
     <svg
       ref={svgRef}
-      className={`canvas ${readOnly ? 'read-only' : ''}`}
+      className={`canvas ${readOnly ? 'read-only' : ''} ${aligning ? 'aligning' : ''}`}
       fontFamily={FONT}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -368,6 +385,7 @@ export function Canvas({
           pointerEvents="none"
         />
         <rect width={map.width} height={map.height} fill={map.surface} />
+        {map.backdrop && !map.backdrop.hidden && <SatelliteLayer backdrop={map.backdrop} view={view} />}
         {showGrid && <rect width={map.width} height={map.height} fill="url(#grid-major)" pointerEvents="none" />}
         <MapItems items={items} />
 

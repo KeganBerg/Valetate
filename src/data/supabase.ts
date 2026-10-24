@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { LotMap, MapItem } from '../types';
+import type { LotMap, MapBackdrop, MapItem } from '../types';
 import { MapConflict, type DataSource, type Role } from './source';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -60,6 +60,7 @@ interface MapRow {
   height: number;
   surface: string;
   items: MapItem[];
+  backdrop?: MapBackdrop | null;
   updated_at: string;
   updated_by: string | null;
   version: number;
@@ -72,6 +73,7 @@ const toMap = (r: MapRow): LotMap => ({
   height: r.height,
   surface: r.surface,
   items: Array.isArray(r.items) ? r.items : [],
+  ...(r.backdrop && { backdrop: r.backdrop }),
   updatedAt: Date.parse(r.updated_at),
   version: r.version,
 });
@@ -159,6 +161,7 @@ export function cloudSource(companyId: string, userId: string): DataSource {
         height: Math.round(m.height),
         surface: m.surface,
         items: m.items,
+        backdrop: m.backdrop ?? null,
         updated_at: new Date(m.updatedAt).toISOString(),
         updated_by: userId,
       };
