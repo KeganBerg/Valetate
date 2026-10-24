@@ -4,9 +4,8 @@ import App from './App';
 import { alreadyRegistered, authMessage } from './authMessages';
 import { useBackToClose } from './dialog';
 import { localSource } from './data/local';
-import { isNetworkError, withOutbox } from './data/outbox';
-import { loadLot } from './lotCache';
-import { friendlyError } from './ops';
+import { friendlyError, isNetworkError } from './errors';
+import { loadCachedMaps } from './lotCache';
 import { canEditMaps, type DataSource, type Role } from './data/source';
 import {
   cloudSource,
@@ -18,7 +17,7 @@ import {
   team,
   type Membership,
 } from './data/supabase';
-import type { LotMap, ParkedCar } from './types';
+import type { LotMap } from './types';
 import { Loading } from './components/Loading';
 
 // opened now and then: loaded the first time they're needed
@@ -62,7 +61,7 @@ function Splash({ text = 'Loading…' }: { text?: string }) {
   );
 }
 
-/** Loads a company's maps and cars, then shows the app. */
+/** Loads a company's maps, then shows the app. */
 function Workspace({
   source,
   role,
@@ -74,43 +73,44 @@ function Workspace({
   account?: React.ComponentProps<typeof App>['account'];
   cacheKey?: string;
 }) {
-  const [data, setData] = useState<{ maps: LotMap[]; cars: ParkedCar[] } | null>(null);
+  const [maps, setMaps] = useState<LotMap[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setError(null);
-    // no signal (or barely any): open with the lot as this phone last saw it;
+    // no signal (or barely any): open with the maps as this device last saw them;
     // the app catches up by itself once it reconnects
-    const saved = cacheKey ? loadLot(cacheKey) : null;
+    const saved = cacheKey ? loadCachedMaps(cacheKey) : null;
     let shown = false;
-    const show = (d: { maps: LotMap[]; cars: ParkedCar[] }) => {
+    const show = (m: LotMap[]) => {
       if (shown) return;
       shown = true;
-      setData(d);
+      setMaps(m);
     };
-    const fallback = window.setTimeout(() => saved && show(saved), navigator.onLine ? 4000 : 0);
-    Promise.all([source.listMaps(), source.listCars()])
-      .then(([maps, cars]) => show({ maps, cars }))
+    const fallback = window.setTimeout(() => saved && show(saved.maps), navigator.onLine ? 4000 : 0);
+    source
+      .listMaps()
+      .then(show)
       .catch((e) => {
-        if (saved && isNetworkError(e)) show(saved);
+        if (saved && isNetworkError(e)) show(saved.maps);
         else if (!shown) setError(friendlyError(e));
       })
       .finally(() => window.clearTimeout(fallback));
   }, [source, cacheKey]);
   useEffect(load, [load]);
 
-  // valets wait for a map; pick up the first one as soon as it's published
-  const waiting = !!data && !data.maps.length && !canEditMaps(role);
+  // viewers wait for a map; pick up the first one as soon as it's published
+  const waiting = !!maps && !maps.length && !canEditMaps(role);
   useEffect(() => {
     if (!waiting) return;
-    return source.subscribe({ maps: load, cars: () => {} });
+    return source.subscribe({ maps: load });
   }, [waiting, source, load]);
 
   if (error)
     return (
       <div className="screen">
         <div className="screen-card">
-          <h1>Couldn't load your lot</h1>
+          <h1>Couldn't load your maps</h1>
           <p className="muted">{error}</p>
           <button className="primary" onClick={load}>
             Try again
@@ -118,8 +118,8 @@ function Workspace({
         </div>
       </div>
     );
-  if (!data) return <Splash />;
-  if (!data.maps.length && !canEditMaps(role))
+  if (!maps) return <Splash />;
+  if (!maps.length && !canEditMaps(role))
     return (
       <div className="screen">
         <div className="screen-card">
@@ -133,7 +133,7 @@ function Workspace({
         </div>
       </div>
     );
-  return <App source={source} role={role} account={account} initialMaps={data.maps} initialCars={data.cars} cacheKey={cacheKey} />;
+  return <App source={source} role={role} account={account} initialMaps={maps} cacheKey={cacheKey} />;
 }
 
 type AuthMode = 'in' | 'up' | 'forgot';
@@ -350,7 +350,7 @@ function Onboarding({
               <button className="choice-tile" onClick={() => setPath('start')}>
                 <span className="choice-icon" aria-hidden="true">🅿️</span>
                 <b>Start a company</b>
-                <span className="muted small">Set up your lot and invite your valets.</span>
+                <span className="muted small">Draw your lots and share them with your team.</span>
               </button>
             </div>
           </>
@@ -408,7 +408,7 @@ function Onboarding({
             }}
           >
             <h2>Start a company</h2>
-            <p className="muted small">You'll be its admin. Next you'll pick a map for your lot and invite your team.</p>
+            <p className="muted small">You'll be its admin. Next you'll pick a starting map for your lot.</p>
             <label className="field">
               <span>Company name</span>
               <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Broward Key Group" autoFocus required />
@@ -527,7 +527,7 @@ function Cloud() {
   const source = useMemo(
     () =>
       current && userId
-        ? withOutbox(cloudSource(current.company.id, userId, displayName(session!.user)), `valetate.outbox.${current.company.id}.${userId}`)
+        ? cloudSource(current.company.id, userId)
         : null,
     [current?.company.id, userId], // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -573,7 +573,7 @@ function Cloud() {
         source={source!}
         role={current.role}
         account={account}
-        cacheKey={`valetate.lot.${current.company.id}.${userId}`}
+        cacheKey={`valetate.maps.${current.company.id}.${userId}`}
       />
       {showTeam && (
         <Suspense fallback={<Loading />}>

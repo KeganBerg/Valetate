@@ -1,41 +1,20 @@
-import { lazy, Suspense, type ComponentProps, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ASSETS, type AssetDef } from './assets';
 import { Canvas, MAX_Z, MIN_Z, type View } from './components/Canvas';
 import { Inspector } from './components/Inspector';
-import { LivePanel } from './components/LivePanel';
 import { MapsDialog } from './components/MapsDialog';
 import { Palette } from './components/Palette';
 import { exportJson, exportPng, exportSvg, parseMapFile } from './export';
 import { GRID, duplicateSpotLabels, findSpot, listSpots, lotAround, snap, uid, unionBounds } from './geometry';
 import { canEditMaps, MapConflict, ROLE_INFO, type DataSource, type Role } from './data/source';
-import { findCar, friendlyError, nextOpenSpot, nextTag } from './ops';
-import { keyHook } from './keys';
-import { blockersOf, blocksAfterMove } from './stacks';
+import { friendlyError } from './errors';
 import { currentMapId, setCurrentMapId } from './storage';
 import { useBackToClose } from './dialog';
-import { saveLot } from './lotCache';
+import { saveCachedMaps } from './lotCache';
 import { GettingStarted } from './components/GettingStarted';
 import { initState, reducer } from './store';
 import { TEMPLATES, instantiate, type Template } from './templates';
-import { liveRequests, newGuestToken } from './requests';
-import { createPhotoQueue } from './photoQueue';
-import type { CarRequest, Feedback, Incident, LotEvent, LotMap, MapItem, ParkedCar, PlateHistory, Shift, Spot, Tip } from './types';
-import { almostFull, isPre, standPoint } from './surge';
-import { EventDialog, EventPill } from './components/EventMode';
-import { forgetPlate, usePlateHistory } from './components/GuestNote';
-import { dollars, methodInfo, NO_RATES, paymentFor, ratesText, type Payment, type Rates, type Validation } from './payments';
-import { dayStart, duration, money, splitPool } from './shifts';
-import { Loading } from './components/Loading';
-import { kindInfo } from './incidents';
-
-// opened now and then: loaded the first time they're needed
-const GuestLinkDialog = lazy(() => import('./components/GuestLink').then((m) => ({ default: m.GuestLinkDialog })));
-const PhotoSheet = lazy(() => import('./components/PhotoSheet').then((m) => ({ default: m.PhotoSheet })));
-const ShiftSheet = lazy(() => import('./components/ShiftSheet').then((m) => ({ default: m.ShiftSheet })));
-const Dashboard = lazy(() => import('./components/Dashboard').then((m) => ({ default: m.Dashboard })));
-const IncidentSheet = lazy(() => import('./components/IncidentSheet').then((m) => ({ default: m.IncidentSheet })));
-const PaymentSheet = lazy(() => import('./components/PaymentSheet').then((m) => ({ default: m.PaymentSheet })));
-const RatesSheet = lazy(() => import('./components/RatesSheet').then((m) => ({ default: m.RatesSheet })));
+import type { LotMap, MapItem, Spot } from './types';
 
 function initialMap(maps: LotMap[]): { map: LotMap; firstRun: boolean } {
   const id = currentMapId();
@@ -57,42 +36,6 @@ function nextRowLetter(items: MapItem[]): string {
 function nextSpaceNumber(items: MapItem[]): string {
   const nums = items.filter((i) => i.kind === 'space').map((i) => parseInt(i.label ?? '', 10)).filter(Number.isFinite);
   return String(nums.length ? Math.max(...nums) + 1 : 1);
-}
-
-const carName = (c: ParkedCar) => (c.ticket ? `#${c.ticket}` : c.plate);
-
-// key tags are handed out across every map at a stand, so one sequence for all of them
-const LAST_TAG_KEY = 'valetate.lastTag';
-function readLastTag(): string {
-  try {
-    return localStorage.getItem(LAST_TAG_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-function writeLastTag(tag: string) {
-  try {
-    localStorage.setItem(LAST_TAG_KEY, tag);
-  } catch {
-    // not remembered; the suggestion falls back to the parked cars
-  }
-}
-
-// per device: an admin who only draws maps never sees the parking and ops screens
-const LIVE_TOOLS_KEY = 'valetate.liveTools';
-function readLiveTools(): boolean {
-  try {
-    return localStorage.getItem(LIVE_TOOLS_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-function writeLiveTools(on: boolean) {
-  try {
-    localStorage.setItem(LIVE_TOOLS_KEY, on ? '1' : '0');
-  } catch {
-    // not remembered; it starts hidden again next time
-  }
 }
 
 function initials(name: string) {
@@ -121,12 +64,11 @@ interface Props {
   role: Role;
   account?: Account;
   initialMaps: LotMap[];
-  initialCars: ParkedCar[];
-  /** where to keep a copy of the lot for opening with no signal */
+  /** where to keep a copy of the maps for opening with no signal */
   cacheKey?: string;
 }
 
-export default function App({ source, role, account, initialMaps, initialCars, cacheKey }: Props) {
+export default function App({ source, role, account, initialMaps, cacheKey }: Props) {
   const canEdit = canEditMaps(role);
   const init = useMemo(() => initialMap(initialMaps), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [state, dispatch] = useReducer(reducer, init.map, initState);
@@ -142,16 +84,6 @@ export default function App({ source, role, account, initialMaps, initialCars, c
   }, []);
   const [snapOn, setSnapOn] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
-  const [mode, setMode] = useState<'edit' | 'live'>(canEdit ? 'edit' : 'live');
-  // the map editor comes first; the live lot (parking, requests, tips, reports) is opt-in from the menu
-  const [opsOn, setOpsOnState] = useState(readLiveTools);
-  const showOps = opsOn || !canEdit;
-  const setOpsOn = (on: boolean) => {
-    setOpsOnState(on);
-    writeLiveTools(on);
-    if (!on) setMode('edit');
-    flash(on ? 'Live lot turned on: switch to it at the top' : 'Live lot hidden: just the map editor');
-  };
   const [saving, setSaving] = useState<'saved' | 'saving' | 'error'>('saved');
   const [panel, setPanel] = useState<'none' | 'palette' | 'inspector'>('none');
   // on a phone the panels are sheets over the map: back closes them
@@ -167,64 +99,34 @@ export default function App({ source, role, account, initialMaps, initialCars, c
   const [highlight, setHighlight] = useState<Spot | null>(null);
   const [toast, setToast] = useState<{ msg: string; undo?: () => void; label?: string } | null>(null);
   const [live, setLive] = useState(true);
-  const [unsynced, setUnsynced] = useState(() => source.outbox?.count() ?? 0);
-  // a change normally syncs in a blink; only mention it once it has been waiting a moment
-  const [showUnsynced, setShowUnsynced] = useState(false);
-  useEffect(() => {
-    if (!unsynced) return setShowUnsynced(false);
-    const t = window.setTimeout(() => setShowUnsynced(true), 1500);
-    return () => window.clearTimeout(t);
-  }, [unsynced > 0]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [cars, setCars] = useState<ParkedCar[]>(initialCars);
-  // a new company's admin sees three setup steps until they're done or hidden
+  // a new company's admin sees the setup steps until they're done or hidden
   const setupKey = cacheKey && `${cacheKey}.setup`;
-  const [setup, setSetup] = useState<{ hidden?: boolean; parked?: boolean }>(() => {
+  const [setupHidden, setSetupHidden] = useState(() => {
     try {
-      return (setupKey && JSON.parse(localStorage.getItem(setupKey) ?? '{}')) || {};
+      return !!(setupKey && JSON.parse(localStorage.getItem(setupKey) ?? '{}').hidden);
     } catch {
-      return {};
+      return false;
     }
   });
-  const saveSetup = (patch: { hidden?: boolean; parked?: boolean }) =>
-    setSetup((cur) => {
-      const next = { ...cur, ...patch };
-      try {
-        if (setupKey) localStorage.setItem(setupKey, JSON.stringify(next));
-      } catch {
-        // not remembered; it shows again next time
-      }
-      return next;
-    });
-  useEffect(() => {
-    if (cars.length && !setup.parked) saveSetup({ parked: true });
-  }, [cars.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hideSetup = () => {
+    setSetupHidden(true);
+    try {
+      if (setupKey) localStorage.setItem(setupKey, JSON.stringify({ hidden: true }));
+    } catch {
+      // not remembered; it shows again next time
+    }
+  };
   useEffect(() => {
     if (!cacheKey) return;
-    const t = window.setTimeout(() => saveLot(cacheKey, maps, cars), 1000);
+    const t = window.setTimeout(() => saveCachedMaps(cacheKey, maps), 1000);
     return () => window.clearTimeout(t);
-  }, [cacheKey, maps, cars]);
-  const [activeSpotKey, setActiveSpotKey] = useState<string | null>(null);
-  const [moving, setMoving] = useState<ParkedCar | null>(null);
-  const [now, setNow] = useState(Date.now());
-  const [lastTag, setLastTagState] = useState<string>(readLastTag);
-  const setLastTag = (t: string) => {
-    setLastTagState(t);
-    writeLastTag(t);
-  };
+  }, [cacheKey, maps]);
   const stageRef = useRef<HTMLDivElement>(null);
   const clipboard = useRef<MapItem[]>([]);
   const loadedRef = useRef<LotMap>(init.map);
 
   const spots = useMemo(() => listSpots(map.items), [map.items]);
   const duplicates = useMemo(() => duplicateSpotLabels(map.items), [map.items]);
-  const mapCars = useMemo(() => cars.filter((c) => c.mapId === map.id), [cars, map.id]);
-  const occupied = useMemo(() => new Map(mapCars.map((c) => [c.spotKey, c])), [mapCars]);
-  // cars whose spot was removed or renumbered in the editor: they still need retrieving
-  const orphans = useMemo(() => {
-    const keys = new Set(spots.map((s) => s.key));
-    return mapCars.filter((c) => !keys.has(c.spotKey));
-  }, [mapCars, spots]);
-  const activeSpot = spots.find((s) => s.key === activeSpotKey) ?? null;
 
   const flash = useCallback((msg: string, undo?: () => void, label?: string) => {
     const t = { msg, undo, label };
@@ -303,276 +205,28 @@ export default function App({ source, role, account, initialMaps, initialCars, c
     setCurrentMapId(map.id);
   }, [map.id]);
 
-  // retrieval requests, and a heads-up when a new one comes in from another device
-  const [requests, setRequests] = useState<CarRequest[]>([]);
-  const [guestLinkCar, setGuestLinkCar] = useState<ParkedCar | null>(null);
-  const [photoCar, setPhotoCar] = useState<ParkedCar | null>(null);
-  const photoQueue = useMemo(() => createPhotoQueue(source), [source]);
-  const seenRequests = useRef<Set<string> | null>(null);
-  const refreshRequests = useCallback(async () => {
-    const list = await source.listRequests().catch(() => null);
-    if (!list) return;
-    const seen = seenRequests.current;
-    const fresh = seen ? list.filter((r) => !seen.has(r.id) && r.status === 'open') : [];
-    seenRequests.current = new Set(list.map((r) => r.id));
-    setRequests(list);
-    if (fresh.length) {
-      const c = carsRef.current.find((x) => x.id === fresh[0].carId);
-      flash(`New request: ${c ? `${carName(c)} in ${c.spotLabel}` : 'a car'}${fresh.length > 1 ? ` (+${fresh.length - 1})` : ''}`);
-      navigator.vibrate?.([120, 60, 120]);
-    }
-  }, [source, flash]);
-  const carsRef = useRef(cars);
-  carsRef.current = cars;
-
-  // event mode: one shared let-out countdown for the whole crew
-  const [event, setEvent] = useState<LotEvent | null>(null);
-  const [eventDialog, setEventDialog] = useState(false);
-  const [outSince, setOutSince] = useState(0);
-  const refreshEvent = useCallback(async () => {
-    const e = await source.getEvent().catch(() => undefined);
-    if (e !== undefined) setEvent(e);
-  }, [source]);
-  useEffect(() => {
-    refreshEvent();
-  }, [refreshEvent]);
-
-  // shifts and the tip pool
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [tips, setTips] = useState<Tip[]>([]);
-  const [tipUrl, setTipUrl] = useState('');
-  const [shiftOpen, setShiftOpen] = useState(false);
-  const [reportOpen, setReportOpen] = useState(false);
-
-  // incident reports; managers get a heads-up when someone files one
-  const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [incidentSheet, setIncidentSheet] = useState<{ car: ParkedCar | null } | null>(null);
-  const seenIncidents = useRef<Set<string> | null>(null);
-  const refreshIncidents = useCallback(async () => {
-    const list = await source.listIncidents().catch(() => null);
-    if (!list) return;
-    const seen = seenIncidents.current;
-    const fresh = seen ? list.filter((i) => !seen.has(i.id) && i.status === 'open' && i.reportedBy !== source.me.id) : [];
-    seenIncidents.current = new Set(list.map((i) => i.id));
-    setIncidents(list);
-    if (fresh.length && role !== 'valet') {
-      const i = fresh[0];
-      flash(`${kindInfo(i.kind).icon} ${kindInfo(i.kind).label}${i.carLabel ? ` · ${i.carLabel.split(' · ')[0]}` : ''} reported by ${i.reportedByName || 'a valet'}`, () => setIncidentSheet({ car: null }), 'View');
-      navigator.vibrate?.([200, 80, 200, 80, 200]);
-    }
-  }, [source, role, flash]);
-  useEffect(() => {
-    refreshIncidents();
-  }, [refreshIncidents]);
-  // a guest who had a bad time: tell a manager while they might still be at the curb
-  const onFeedback = useCallback(
-    (f: Feedback) => {
-      if (role === 'valet' || f.rating > 2) return;
-      flash(`${'★'.repeat(f.rating)} from #${f.ticket || '—'}${f.comment ? `: “${f.comment.slice(0, 60)}”` : ''}`, () => setReportOpen(true), 'View');
-      navigator.vibrate?.([200, 80, 200]);
-    },
-    [role, flash],
-  );
-  const lookupPlate = useCallback((plate: string) => source.lookupPlate(plate), [source]);
-
-  // what the stand charges, validation codes, and who's paid
-  const [rates, setRates] = useState<Rates>(NO_RATES);
-  const [validations, setValidations] = useState<Validation[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [paySheet, setPaySheet] = useState<{ car: ParkedCar; end: number; checkout: boolean } | null>(null);
-  const [ratesOpen, setRatesOpen] = useState(false);
-  const refreshPayments = useCallback(async () => {
-    const [r, v, p] = await Promise.all([
-      source.getRates().catch(() => null),
-      source.listValidations().catch(() => null),
-      source.listPayments(Date.now() - 3 * 24 * 60 * 60 * 1000).catch(() => null),
-    ]);
-    if (r) setRates(r);
-    if (v) setValidations(v);
-    if (p) setPayments(p);
-  }, [source]);
-  useEffect(() => {
-    refreshPayments();
-  }, [refreshPayments]);
-  const openIncidents = incidents.filter((i) => i.status === 'open').length;
-  const refreshTeam = useCallback(async () => {
-    const from = dayStart(Date.now());
-    const [s, t, u] = await Promise.all([
-      source.listShifts(from - 24 * 60 * 60 * 1000).catch(() => null),
-      source.listTips(from).catch(() => null),
-      source.getTipUrl().catch(() => null),
-    ]);
-    if (s) setShifts(s);
-    if (t) setTips(t);
-    if (u !== null) setTipUrl(u);
-  }, [source]);
-  useEffect(() => {
-    refreshTeam();
-  }, [refreshTeam]);
-  const myShift = useMemo(() => {
-    const t = Math.max(now, Date.now());
-    const open = shifts.find((s) => s.userId === source.me.id && !s.endedAt);
-    const { total, shares } = splitPool(tips, shifts, dayStart(t), Infinity, t);
-    const mine = shares.find((s) => s.userId === source.me.id)?.cents ?? 0;
-    return { on: !!open, time: open ? `on ${duration(t - open.startedAt)}` : '', pool: open ? money(mine) : money(total) };
-  }, [shifts, tips, now, source]);
-  useEffect(() => {
-    refreshRequests();
-  }, [refreshRequests]);
-  // a car asked for "at the let-out" follows the let-out if it's moved; once the event ends it's just a request
-  const timedRequests = useMemo(
-    () => (event ? requests.map((r) => (r.dueAt ? { ...r, dueAt: event.letOutAt } : r)) : requests.map((r) => (r.dueAt ? { ...r, dueAt: null } : r))),
-    [requests, event],
-  );
-  const mapRequests = useMemo(
-    () => liveRequests(timedRequests, new Set(mapCars.map((c) => c.id))),
-    [timedRequests, mapCars],
-  );
-  const requestedSpots = useMemo(() => {
-    const byCar = new Map(mapCars.map((c) => [c.id, c.spotKey]));
-    return new Map(mapRequests.map((r) => [byCar.get(r.carId)!, isPre(r, now) ? ('pre' as const) : r.status]));
-  }, [mapRequests, mapCars, now]);
-  /** spots holding cars that must move before a requested car can get out */
-  const mustMoveSpots = useMemo(() => {
-    const keys = new Set<string>();
-    for (const r of mapRequests) if (r.status !== 'ready') for (const c of blockersOf(mapCars, r.carId)) keys.add(c.spotKey);
-    return keys;
-  }, [mapRequests, mapCars]);
-  // where the stand is on this lot (the valet booth), for staging during an event
-  const stand = useMemo(
-    () => standPoint(map.items, { x: map.width / 2, y: map.height }),
-    [map.items, map.width, map.height],
-  );
-
-  // the let-out pace: how many cars have left since it started
-  const letOut = event?.letOutAt ?? 0;
-  const lettingOut = !!event && now >= letOut;
-  useEffect(() => {
-    if (!lettingOut) return setOutSince(0);
-    let stop = false;
-    const check = () => source.carsOutSince(letOut).then((n) => !stop && setOutSince(n), () => {});
-    check();
-    const t = window.setInterval(check, 20000);
-    return () => {
-      stop = true;
-      window.clearInterval(t);
-    };
-  }, [source, lettingOut, letOut, cars.length]);
-
-  // say so when the let-out starts, once per event
-  const announced = useRef<string | null>(null);
-  useEffect(() => {
-    if (!event || !lettingOut || announced.current === event.id) return;
-    const first = announced.current === null && now - letOut > 60_000;
-    announced.current = event.id;
-    if (first) return; // opened the app mid let-out: nothing new to announce
-    const due = timedRequests.filter((r) => r.dueAt && r.status === 'open').length;
-    flash(`${event.name || 'The event'} is letting out${due ? ` · ${due} asked-ahead ${due === 1 ? 'car is' : 'cars are'} due now` : ''}`);
-    navigator.vibrate?.([200, 80, 200, 80, 200]);
-  }, [event, lettingOut, letOut, now, timedRequests, flash]);
-
-  // lot nearly full: say so once as it fills, and point at the lot with the most room
-  const openSpots = spots.length - mapCars.filter((c) => spots.some((s) => s.key === c.spotKey)).length;
-  const lotFull = mode === 'live' && almostFull(openSpots, spots.length);
-  const wasFull = useRef(false);
-  useEffect(() => {
-    if (lotFull && !wasFull.current) {
-      const room = maps
-        .filter((m) => m.id !== map.id)
-        .map((m) => ({ m, open: listSpots(m.items).length - cars.filter((c) => c.mapId === m.id).length }))
-        .sort((a, b) => b.open - a.open)[0];
-      flash(`${map.name} is almost full: ${openSpots} open${room && room.open > 0 ? ` · ${room.m.name} has ${room.open}` : ''}`);
-    }
-    wasFull.current = lotFull;
-  }, [lotFull]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const patchRequest = (id: string, patch: Partial<CarRequest>) =>
-    setRequests((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-
-  const refreshCars = useCallback(async () => {
-    try {
-      setCars(await source.listCars());
-    } catch {
-      // keep what we have; the next change will retry
-    }
-  }, [source]);
-
   // live updates from other devices
   const mapRef = useRef(map);
   mapRef.current = map;
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
   useEffect(
     () =>
       source.subscribe({
-        cars: refreshCars,
-        requests: refreshRequests,
-        event: refreshEvent,
-        team: refreshTeam,
-        incidents: refreshIncidents,
-        feedback: onFeedback,
-        payments: refreshPayments,
         live: setLive,
         maps: async () => {
           const ms = await source.listMaps().catch(() => null);
           if (!ms) return;
           setMaps(ms);
-          // someone else changed the map we're looking at: follow along unless we're editing it
+          // someone else changed the map on screen: viewers follow along (editors keep their work)
           const cur = ms.find((m) => m.id === mapRef.current.id);
-          if (cur && cur.updatedAt > mapRef.current.updatedAt && modeRef.current === 'live') {
+          if (cur && cur.updatedAt > mapRef.current.updatedAt && !canEdit) {
             loadedRef.current = cur;
             noteVersion(cur);
             dispatch({ type: 'load', map: cur });
           }
         },
       }),
-    [source, refreshCars, refreshRequests, refreshEvent, refreshTeam, refreshIncidents, onFeedback, refreshPayments],
+    [source, canEdit], // eslint-disable-line react-hooks/exhaustive-deps
   );
-
-  // a phone that slept or lost signal missed changes: catch up as soon as it's back
-  useEffect(() => {
-    const catchUp = () => {
-      if (document.visibilityState !== 'visible') return;
-      source.outbox?.flush().then(refreshCars);
-      refreshCars();
-    };
-    document.addEventListener('visibilitychange', catchUp);
-    window.addEventListener('online', catchUp);
-    const offline = () => setLive(false);
-    window.addEventListener('offline', offline);
-    return () => {
-      document.removeEventListener('visibilitychange', catchUp);
-      window.removeEventListener('online', catchUp);
-      window.removeEventListener('offline', offline);
-    };
-  }, [source, refreshCars]);
-
-  // car changes made with no signal: show how many are waiting, and say so if one is refused later
-  useEffect(
-    () =>
-      source.outbox?.subscribe((count, dropped) => {
-        setUnsynced(count);
-        if (dropped !== undefined) {
-          flash(`A change made offline didn't save: ${friendlyError(dropped)}`);
-          refreshCars();
-        }
-      }),
-    [source, flash, refreshCars],
-  );
-
-  const run = (p: Promise<unknown>, undo?: () => void) =>
-    p.catch((e) => {
-      flash(friendlyError(e));
-      undo?.();
-      refreshCars();
-    });
-
-  useEffect(() => {
-    if (mode !== 'live') return;
-    setNow(Date.now());
-    const t = window.setInterval(() => setNow(Date.now()), 15000);
-    return () => window.clearInterval(t);
-  }, [mode]);
 
   const mapNow = useRef(map);
   mapNow.current = map;
@@ -636,8 +290,6 @@ export default function App({ source, role, account, initialMaps, initialCars, c
     dispatch({ type: 'load', map: m });
     setShowMaps(false);
     setHighlight(null);
-    setActiveSpotKey(null);
-    setMoving(null);
     if (persist) {
       upsertMapInList(m);
       persistMap(m);
@@ -712,78 +364,6 @@ export default function App({ source, role, account, initialMaps, initialCars, c
     commit(where === 'front' ? [...rest, ...sel] : [...sel, ...rest]);
   };
 
-  const setBlocks = (car: ParkedCar, blocks: string[]) => {
-    setCars((cs) => cs.map((c) => (c.id === car.id ? { ...c, blocks } : c)));
-    run(source.setBlocks(car.id, blocks));
-  };
-
-  const setKeys = (car: ParkedCar, out: boolean) => {
-    const patch = out
-      ? { keysWith: source.me.id, keysWithName: source.me.name, keysOutAt: Date.now() }
-      : { keysWith: '', keysWithName: '', keysOutAt: null };
-    setCars((cs) => cs.map((c) => (c.id === car.id ? { ...c, ...patch } : c)));
-    run(source.setKeys(car.id, out));
-    const hook = keyHook(car);
-    flash(out ? `Keys for ${carName(car)} are with you` : `Keys for ${carName(car)} back ${hook ? `on hook ${hook}` : 'on the board'}`);
-  };
-
-  const retrieveCar = (car: ParkedCar, paid = '') => {
-    const putBack = () => setCars((cs) => [...cs.filter((c) => c.id !== car.id), car]);
-    const takeOff = () => setCars((cs) => cs.filter((c) => c.id !== car.id));
-    takeOff();
-    setRequests((rs) => rs.filter((r) => r.carId !== car.id));
-    const done = source.retrieveCar(car.id);
-    run(done, putBack);
-    // this visit now counts toward the plate's history
-    if (car.plate) done.then(() => forgetPlate(car.plate), () => {});
-    // a mis-tap at rush shouldn't lose a car: offer undo for a few seconds
-    flash(`${carName(car)} ${paid ? `${paid} · ` : ''}retrieved from ${car.spotLabel}`, () => {
-      putBack();
-      run(
-        done.catch(() => {}).then(() => source.unretrieveCar(car)),
-        takeOff,
-      );
-      flash(`${carName(car)} is back in ${car.spotLabel}`);
-    });
-  };
-
-  // with rates on, handing a car over goes through checkout first
-  const checkOut = (car: ParkedCar) => {
-    if (rates.mode === 'off' || paymentFor(payments, car)) return retrieveCar(car);
-    setPaySheet({ car, end: Date.now(), checkout: true });
-  };
-  const takePayment = (car: ParkedCar, pay: Payment, checkout: boolean) => {
-    setPaySheet(null);
-    setPayments((ps) => [...ps, { ...pay, takenBy: source.me.id, takenByName: source.me.name }]);
-    run(source.takePayment(pay), () => setPayments((ps) => ps.filter((x) => x.id !== pay.id))).then(refreshPayments);
-    const what = pay.method === 'comp' ? 'comped' : pay.amountCents ? `paid ${dollars(pay.amountCents)}` : methodInfo(pay.method).label.toLowerCase();
-    if (checkout) retrieveCar(car, what);
-    else flash(`${carName(car)} ${what}`);
-  };
-
-  const requestCar = (car: ParkedCar, dueAt?: number) => {
-    const r: CarRequest = {
-      dueAt: dueAt ?? null,
-      id: uid(),
-      carId: car.id,
-      mapId: car.mapId,
-      status: 'open',
-      source: 'staff',
-      note: '',
-      createdAt: Date.now(),
-      createdByName: source.me.name,
-      claimedBy: '',
-      claimedByName: '',
-      claimedAt: null,
-      readyAt: null,
-    };
-    seenRequests.current?.add(r.id);
-    setRequests((rs) => [...rs, r]);
-    run(source.createRequest(r), () => setRequests((rs) => rs.filter((x) => x.id !== r.id))).then(refreshRequests);
-    setNow(Date.now());
-    flash(dueAt ? `${carName(car)} asked for at the let-out` : `${carName(car)} requested`);
-  };
-
   const centerOn = (s: Spot) => {
     const r = stageRef.current!.getBoundingClientRect();
     const z = Math.max(view.z, 1.2);
@@ -792,67 +372,14 @@ export default function App({ source, role, account, initialMaps, initialCars, c
     setView({ z, x: r.width / 2 - s.cx * z, y: cy - s.cy * z });
   };
 
-  const focusSpot = (s: Spot) => {
-    setHighlight(s);
-    centerOn(s);
-    if (mode === 'edit') dispatch({ type: 'select', ids: [s.itemId] });
-    else {
-      setActiveSpotKey(s.key);
-      setPanel('inspector');
-    }
-    window.setTimeout(() => setHighlight((h) => (h === s ? null : h)), 4000);
-  };
-
   const find = (q: string) => {
     if (!q.trim()) return;
-    const spot = findSpot(map.items, q);
-    // while moving a car, typing a spot number drops it there
-    if (moving && spot) return onSpotClick(spot);
-    // in the live lot, "104" most often means tag 104, so check cars on every map first;
-    // a spot label typed exactly still wins over a loose match like part of a plate
-    const hit = findCar(cars, q);
-    const useCar = hit && (mode === 'live' ? hit.rank <= 1 || !spot : !spot);
-    if (!useCar) {
-      if (spot) focusSpot(spot);
-      else flash(`Nothing called "${q}"`);
-      return;
-    }
-    const car = hit.car;
-    const m = car.mapId === map.id ? map : maps.find((x) => x.id === car.mapId);
-    if (!m) return flash(`${carName(car)} is on a map that was deleted`);
-    const s = listSpots(m.items).find((sp) => sp.key === car.spotKey);
-    if (m.id !== map.id) load(m, false);
-    if (!s) {
-      setPanel('inspector');
-      return flash(`${carName(car)} needs a new spot (see the top of the list)`);
-    }
-    // after switching maps, wait for the new map to be fitted before zooming in on the spot
-    if (m.id !== map.id) requestAnimationFrame(() => focusSpot(s));
-    else focusSpot(s);
-  };
-
-  const onSpotClick = (s: Spot | null) => {
-    if (moving && s) {
-      if (occupied.has(s.key)) return flash(`Spot ${s.label} is taken`);
-      // a car that moves is no longer in the stack it was part of
-      const unstack = blocksAfterMove(cars, moving.id);
-      const unstacked = new Map(unstack.map((u) => [u.id, u.blocks]));
-      setCars((cs) =>
-        cs.map((c) => ({
-          ...c,
-          ...(unstacked.has(c.id) ? { blocks: unstacked.get(c.id) } : {}),
-          ...(c.id === moving.id ? { spotKey: s.key, spotLabel: s.label } : {}),
-        })),
-      );
-      run(source.moveCar(moving.id, s.key, s.label));
-      for (const u of unstack) run(source.setBlocks(u.id, u.blocks));
-      flash(`${carName(moving)} moved to ${s.label}`);
-      setMoving(null);
-      setActiveSpotKey(s.key);
-      return;
-    }
-    setActiveSpotKey(s?.key ?? null);
-    if (s) setPanel('inspector');
+    const s = findSpot(map.items, q);
+    if (!s) return flash(`No spot called "${q}"`);
+    setHighlight(s);
+    centerOn(s);
+    if (canEdit) dispatch({ type: 'select', ids: [s.itemId] });
+    window.setTimeout(() => setHighlight((h) => (h === s ? null : h)), 4000);
   };
 
   // keyboard shortcuts
@@ -862,7 +389,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
         if (e.key === 'Escape') (e.target as HTMLElement).blur();
         return;
       }
-      if (showMaps) return;
+      if (showMaps || !canEdit) return;
       const mod = e.metaKey || e.ctrlKey;
       const k = e.key.toLowerCase();
       if (mod && k === 'z') {
@@ -871,11 +398,6 @@ export default function App({ source, role, account, initialMaps, initialCars, c
       } else if (mod && k === 'y') {
         e.preventDefault();
         dispatch({ type: 'redo' });
-      } else if (mode !== 'edit') {
-        if (k === 'escape') {
-          setActiveSpotKey(null);
-          setMoving(null);
-        }
       } else if (mod && k === 'd') {
         e.preventDefault();
         duplicate();
@@ -917,8 +439,6 @@ export default function App({ source, role, account, initialMaps, initialCars, c
     }
   };
 
-  // one-handed: on a phone's live lot the search sits at the bottom, by the thumb
-  const dockFind = phone && mode === 'live';
   const findForm = (
     <form
       className="find"
@@ -930,15 +450,15 @@ export default function App({ source, role, account, initialMaps, initialCars, c
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder={mode === 'live' ? 'Find tag, plate or spot' : 'Find spot: D 12'}
-        aria-label={mode === 'live' ? 'Find a car or spot' : 'Find a spot'}
+        placeholder="Find spot: D 12"
+        aria-label="Find a spot"
         enterKeyHint="search"
       />
     </form>
   );
 
   return (
-    <div className={`app mode-${mode} ${showOps ? 'ops-on' : ''}`}>
+    <div className={`app ${canEdit ? 'mode-edit' : 'mode-view'}`}>
       <header className="topbar">
         <div className="brand">
           <span className="logo">V</span>
@@ -947,25 +467,9 @@ export default function App({ source, role, account, initialMaps, initialCars, c
         <button className="map-name" onClick={() => setShowMaps(true)} title="Switch map">
           {map.name || 'Untitled lot'} <span className="caret">▾</span>
         </button>
-        {canEdit && showOps && (
-          <div className="seg" role="tablist">
-            <button className={mode === 'edit' ? 'on' : ''} onClick={() => setMode('edit')}>
-              Edit map
-            </button>
-            <button
-              className={mode === 'live' ? 'on' : ''}
-              onClick={() => {
-                setMode('live');
-                dispatch({ type: 'select', ids: [] });
-              }}
-            >
-              Live lot
-            </button>
-          </div>
-        )}
-        {!dockFind && (showOps || !phone) && findForm}
+        {(!canEdit || !phone) && findForm}
         <div className="grow" />
-        {mode === 'edit' && (
+        {canEdit && (
           <div className="tools">
             <button className="history" onClick={() => dispatch({ type: 'undo' })} disabled={!state.past.length} title="Undo (Ctrl+Z)" aria-label="Undo">
               ↶
@@ -981,7 +485,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             </button>
           </div>
         )}
-        {canEdit && mode === 'edit' && (
+        {canEdit && (
           <span className={`save-state ${saving}`} title={source.kind === 'cloud' ? 'Saved for your whole team' : 'Saved on this device'}>
             {saving === 'saving' ? 'Saving…' : saving === 'error' ? 'Not saved' : 'Saved'}
           </span>
@@ -989,7 +493,6 @@ export default function App({ source, role, account, initialMaps, initialCars, c
         <details className="menu">
           <summary aria-label="Menu">
             {account ? <span className="avatar">{initials(account.name || account.email)}</span> : <span className="dots">•••</span>}
-            {showOps && openIncidents > 0 && role !== 'valet' && <span className="menu-dot" aria-label={`${openIncidents} open incidents`} />}
           </summary>
           <div className="menu-list" onClick={(e) => (e.currentTarget.parentElement as HTMLDetailsElement).removeAttribute('open')}>
             {account && (
@@ -1004,34 +507,10 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             {account?.onTeam && <button onClick={account.onTeam}>Team and roles</button>}
             {account?.onSwitchCompany && <button onClick={account.onSwitchCompany}>Switch company</button>}
             {account && <hr />}
-            {showOps && (
-              <>
-                {mode === 'live' && <button onClick={() => setShiftOpen(true)}>Shift and tips</button>}
-                <button onClick={() => setIncidentSheet({ car: null })}>
-                  Incidents{openIncidents > 0 && <span className="menu-count">{openIncidents} open</span>}
-                </button>
-                {role !== 'valet' && <button onClick={() => setReportOpen(true)}>Stand report</button>}
-                {role !== 'valet' && <button onClick={() => setRatesOpen(true)}>Rates and validations</button>}
-                {mode === 'live' && <button onClick={() => setEventDialog(true)}>{event ? 'Event: change let-out time' : 'Start event mode'}</button>}
-                <hr />
-              </>
-            )}
-            <button onClick={() => setShowMaps(true)}>Maps and templates</button>
+            <button onClick={() => setShowMaps(true)}>{canEdit ? 'Maps and templates' : 'All maps'}</button>
             <button onClick={() => exportPng(map).catch((e) => flash(e.message))}>Save map as image (PNG)</button>
             <button onClick={() => exportSvg(map)}>Save map as vector (SVG)</button>
             <button onClick={() => exportJson(map)}>Export map file</button>
-            {canEdit && (
-              <>
-                <hr />
-                <button className="menu-toggle" role="switch" aria-checked={opsOn} onClick={() => setOpsOn(!opsOn)}>
-                  <span>
-                    Live lot tools
-                    <small>Park cars, requests, tips and reports</small>
-                  </span>
-                  <i className={`switch ${opsOn ? 'on' : ''}`} aria-hidden="true" />
-                </button>
-              </>
-            )}
             {account && (
               <>
                 <hr />
@@ -1043,8 +522,8 @@ export default function App({ source, role, account, initialMaps, initialCars, c
       </header>
 
       <main>
-        {mode === 'edit' && <Palette onAdd={(a) => addAsset(a)} open={panel === 'palette'} onClose={() => setPanel('none')} />}
-        <div className={`stage ${mode === 'live' && (event || lotFull) ? 'has-pill' : ''}`} ref={stageRef}>
+        {canEdit && <Palette onAdd={(a) => addAsset(a)} open={panel === 'palette'} onClose={() => setPanel('none')} />}
+        <div className="stage" ref={stageRef}>
           <Canvas
             map={map}
             selected={selected}
@@ -1052,19 +531,13 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             view={view}
             setView={setView}
             snapOn={snapOn}
-            showGrid={showGrid && mode === 'edit'}
+            showGrid={showGrid && canEdit}
             highlight={highlight}
             onDropAsset={(name, x, y) => {
               const a = ASSETS.find((d) => d.name === name);
               if (a) addAsset(a, { x, y });
             }}
-            mode={mode}
-            occupied={occupied}
-            requested={mode === 'live' ? requestedSpots : undefined}
-            mustMove={mode === 'live' ? mustMoveSpots : undefined}
-            now={now}
-            activeSpot={activeSpotKey}
-            onSpotClick={onSpotClick}
+            readOnly={!canEdit}
           />
           <div className="zoom">
             <button onClick={() => zoomBy(1 / 1.25)} aria-label="Zoom out">
@@ -1077,31 +550,21 @@ export default function App({ source, role, account, initialMaps, initialCars, c
               +
             </button>
           </div>
-          <div className="mobile-tabs">
-            {mode === 'edit' && (
+          {canEdit && (
+            <div className="mobile-tabs">
               <button className={panel === 'palette' ? 'on' : ''} onClick={() => setPanel(panel === 'palette' ? 'none' : 'palette')}>
                 ＋ Add
               </button>
-            )}
-            <button className={panel === 'inspector' ? 'on' : ''} onClick={() => setPanel(panel === 'inspector' ? 'none' : 'inspector')}>
-              {mode === 'edit' ? 'Properties' : 'Cars'}
-              {mode === 'live' && mapRequests.some((r) => r.status === 'open' && !isPre(r, now)) && (
-                <span className="tab-badge">{mapRequests.filter((r) => r.status === 'open' && !isPre(r, now)).length}</span>
-              )}
-            </button>
-            {dockFind && findForm}
-          </div>
-          {mode === 'live' && event && <EventPill event={event} onOpen={() => setPanel('inspector')} />}
-          {mode === 'live' && lotFull && !event && (
-            <div className="full-pill" role="status">
-              Lot almost full · {openSpots} open
+              <button className={panel === 'inspector' ? 'on' : ''} onClick={() => setPanel(panel === 'inspector' ? 'none' : 'inspector')}>
+                Properties
+              </button>
             </div>
           )}
-          {role === 'admin' && account && setupKey && !setup.hidden && (
+          {role === 'admin' && account && setupKey && !setupHidden && (
             <GettingStarted
               company={account.companyName}
-              onHide={() => saveSetup({ hidden: true })}
-              done={showOps ? 'Your team can park and find cars on the live lot.' : 'Your lot is drawn and your team can open it.'}
+              onHide={hideSetup}
+              done="Your lot is drawn and your team can open it."
               steps={[
                 {
                   label: 'Draw your lot',
@@ -1111,20 +574,10 @@ export default function App({ source, role, account, initialMaps, initialCars, c
                 },
                 {
                   label: 'Invite your team',
-                  hint: 'Text your valets a link. They join with one tap.',
+                  hint: 'Text them a link. They join with one tap and see your maps.',
                   done: (account.teamSize ?? 1) > 1,
                   action: account.onTeam && { label: 'Invite', run: account.onTeam },
                 },
-                ...(showOps
-                  ? [
-                      {
-                        label: 'Park your first car',
-                        hint: 'On the live lot, tap an open spot.',
-                        done: !!setup.parked,
-                        action: mode === 'live' ? undefined : { label: 'Live lot', run: () => setMode('live') },
-                      },
-                    ]
-                  : []),
               ]}
             />
           )}
@@ -1144,15 +597,13 @@ export default function App({ source, role, account, initialMaps, initialCars, c
               )}
             </div>
           )}
-          {mode === 'live' && ((showUnsynced && unsynced > 0) || (!live && source.kind === 'cloud')) && (
+          {!live && source.kind === 'cloud' && (
             <div className="conn" role="status">
-              {showUnsynced && unsynced > 0
-                ? `No signal · ${unsynced} ${unsynced === 1 ? 'change' : 'changes'} saved on this phone`
-                : 'Reconnecting… the lot may be out of date'}
+              Reconnecting… changes from your team may be delayed
             </div>
           )}
         </div>
-        {mode === 'edit' ? (
+        {canEdit && (
           <Inspector
             map={map}
             selected={selItems}
@@ -1168,276 +619,8 @@ export default function App({ source, role, account, initialMaps, initialCars, c
             open={panel === 'inspector'}
             onClose={() => setPanel('none')}
           />
-        ) : (
-          <LivePanel
-            spots={spots}
-            cars={mapCars}
-            allCars={cars}
-            orphans={orphans}
-            active={activeSpot}
-            now={now}
-            moving={moving}
-            suggestedTag={nextTag(cars, lastTag)}
-            open={panel === 'inspector'}
-            onClose={() => setPanel('none')}
-            onPark={(spot, data) => {
-              const car: ParkedCar = {
-                ...data,
-                id: uid(),
-                mapId: map.id,
-                spotKey: spot.key,
-                spotLabel: spot.label,
-                parkedAt: Date.now(),
-                ...(source.kind === 'cloud' ? { guestToken: newGuestToken() } : {}),
-              };
-              setCars((cs) => [...cs, car]);
-              run(source.parkCar(car), () => setCars((cs) => cs.filter((c) => c.id !== car.id))).then(() => car.plate && forgetPlate(car.plate));
-              setNow(Date.now());
-              if (car.ticket) setLastTag(car.ticket);
-              // jump to the next open spot so the next car is one tap away
-              const taken = new Set([...mapCars.map((c) => c.spotKey), spot.key]);
-              const next = nextOpenSpot(spots, taken, spot.key);
-              setActiveSpotKey(next?.key ?? null);
-              flash(`${carName(car)} parked in ${spot.label}${next ? ` · next ${next.label}` : ''}`);
-            }}
-            onUpdate={(car, patch) => {
-              setCars((cs) => cs.map((c) => (c.id === car.id ? { ...c, ...patch } : c)));
-              run(source.updateCar(car.id, patch));
-              if (patch.ticket) setLastTag(patch.ticket);
-              flash('Details saved');
-            }}
-            onRetrieve={checkOut}
-            pay={
-              rates.mode === 'off'
-                ? undefined
-                : {
-                    rates,
-                    payments,
-                    onTake: (car) => setPaySheet({ car, end: Date.now(), checkout: false }),
-                    onVoid:
-                      role === 'valet'
-                        ? undefined
-                        : (pay) => {
-                            setPayments((ps) => ps.map((x) => (x.id === pay.id ? { ...x, voided: true } : x)));
-                            run(source.voidPayment(pay.id)).then(refreshPayments);
-                            flash('Payment undone');
-                          },
-                  }
-            }
-            onFind={find}
-            onKeys={setKeys}
-            onBlocks={setBlocks}
-            requests={mapRequests}
-            me={source.me.id}
-            onRequest={requestCar}
-            event={event}
-            outSince={outSince}
-            stand={stand}
-            onEditEvent={() => setEventDialog(true)}
-            shift={myShift}
-            onShift={() => setShiftOpen(true)}
-            preUntil={event && event.letOutAt > now ? event.letOutAt : undefined}
-            onRequestTag={(tag, dueAt) => {
-              const t = tag.replace(/^#/, '').trim().toLowerCase();
-              const car = mapCars.find((c) => c.ticket.trim().toLowerCase() === t) ?? cars.find((c) => c.ticket.trim().toLowerCase() === t);
-              if (!car) return `No car with tag #${tag} is parked`;
-              if (car.mapId !== map.id) return `#${tag} is on another lot`;
-              if (requests.some((r) => r.carId === car.id)) return `#${tag} is already requested`;
-              requestCar(car, dueAt);
-              return null;
-            }}
-            onGuestLink={source.kind === 'cloud' ? setGuestLinkCar : undefined}
-            onPhotos={setPhotoCar}
-            onIncident={(car) => setIncidentSheet({ car })}
-            lookupPlate={lookupPlate}
-            onSaveProfile={(prof) => {
-              source.saveVehicle(prof).then(
-                () => {
-                  forgetPlate(prof.plate);
-                  flash('Guest profile saved');
-                },
-                (e) => flash(friendlyError(e)),
-              );
-            }}
-            onClaim={(r) => {
-              patchRequest(r.id, { status: 'claimed', claimedBy: source.me.id, claimedByName: source.me.name, claimedAt: Date.now() });
-              // whoever goes for the car takes its keys off the board
-              const car = cars.find((c) => c.id === r.carId);
-              if (car && !car.keysWith)
-                setCars((cs) =>
-                  cs.map((c) => (c.id === car.id ? { ...c, keysWith: source.me.id, keysWithName: source.me.name, keysOutAt: Date.now() } : c)),
-                );
-              run(source.claimRequest(r.id).then(() => (car && !car.keysWith ? source.setKeys(car.id, true) : undefined)))
-                .then(refreshRequests)
-                .then(refreshCars);
-            }}
-            onUnclaim={(r) => {
-              patchRequest(r.id, { status: 'open', claimedBy: '', claimedByName: '', claimedAt: null });
-              run(source.unclaimRequest(r.id)).then(refreshRequests);
-            }}
-            onReady={(r) => {
-              patchRequest(r.id, { status: 'ready', readyAt: Date.now() });
-              run(source.markReady(r.id)).then(refreshRequests);
-            }}
-            onCancel={(r) => {
-              setRequests((rs) => rs.filter((x) => x.id !== r.id));
-              run(source.cancelRequest(r.id)).then(refreshRequests);
-            }}
-            onHandOver={checkOut}
-            onStartMove={setMoving}
-            onFocus={(s) => {
-              setActiveSpotKey(s.key);
-              centerOn(s);
-            }}
-          />
         )}
       </main>
-
-      {eventDialog && (
-        <EventDialog
-          event={event}
-          onClose={() => setEventDialog(false)}
-          onSave={(e) => {
-            const fresh = !event;
-            setEvent(e);
-            setEventDialog(false);
-            run(fresh ? source.startEvent(e) : source.updateEvent(e.id, e)).then(refreshEvent);
-            flash(fresh ? `Event mode on: let-out at ${new Date(e.letOutAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Let-out time saved');
-            setPanel('inspector');
-          }}
-          onEnd={() => {
-            if (!event) return;
-            setEvent(null);
-            setEventDialog(false);
-            run(source.endEvent(event.id)).then(refreshEvent);
-            flash('Event ended');
-          }}
-        />
-      )}
-      {incidentSheet && (
-        <Suspense fallback={<Loading />}>
-          <IncidentSheet
-            source={source}
-            me={source.me}
-            isManager={role !== 'valet'}
-            incidents={incidents}
-            cars={cars}
-            forCar={incidentSheet.car}
-            onChanged={() => {
-              refreshIncidents();
-              flash('Report filed');
-            }}
-            onResolve={(inc, note, reopen) => {
-              setIncidents((list) =>
-                list.map((i) =>
-                  i.id === inc.id
-                    ? reopen
-                      ? { ...i, status: 'open', resolvedAt: null }
-                      : { ...i, status: 'resolved', resolvedAt: Date.now(), resolvedByName: source.me.name, resolution: note }
-                    : i,
-                ),
-              );
-              run(source.resolveIncident(inc.id, note, reopen)).then(refreshIncidents);
-              flash(reopen ? 'Reopened' : 'Marked resolved');
-            }}
-            onClose={() => setIncidentSheet(null)}
-          />
-        </Suspense>
-      )}
-      {paySheet && (
-        <Suspense fallback={<Loading />}>
-          <PaySheetFor
-            {...paySheet}
-            rates={rates}
-            validations={validations}
-            lookupPlate={lookupPlate}
-            onPay={(pay) => takePayment(paySheet.car, pay, paySheet.checkout)}
-            onSkip={() => {
-              setPaySheet(null);
-              retrieveCar(paySheet.car, 'not paid');
-            }}
-            onClose={() => setPaySheet(null)}
-          />
-        </Suspense>
-      )}
-      {ratesOpen && (
-        <Suspense fallback={<Loading />}>
-          <RatesSheet
-            rates={rates}
-            validations={validations}
-            canSetRates={role === 'admin'}
-            onRates={(r) => {
-              setRates(r);
-              run(source.setRates(r)).then(refreshPayments);
-              flash(r.mode === 'off' ? 'Rates off: no checkout' : `Rates saved: ${ratesText(r)}`);
-            }}
-            onValidation={(v) => {
-              setValidations((list) => (list.some((x) => x.id === v.id) ? list.map((x) => (x.id === v.id ? v : x)) : [...list, v]));
-              source.saveValidation(v).then(
-                () => {
-                  refreshPayments();
-                  flash(v.active ? `Code ${v.code} is live` : `Code ${v.code} retired`);
-                },
-                (e) => {
-                  refreshPayments();
-                  flash(friendlyError(e));
-                },
-              );
-            }}
-            onClose={() => setRatesOpen(false)}
-          />
-        </Suspense>
-      )}
-      {reportOpen && (
-        <Suspense fallback={<Loading />}>
-          <Dashboard source={source} onClose={() => setReportOpen(false)} />
-        </Suspense>
-      )}
-      {shiftOpen && (
-        <Suspense fallback={<Loading />}>
-          <ShiftSheet
-            me={source.me}
-            isManager={role !== 'valet'}
-            isAdmin={role === 'admin'}
-            now={now}
-            shifts={shifts}
-            tips={tips}
-            tipUrl={tipUrl}
-            cars={cars}
-            requests={requests}
-            openIncidents={openIncidents}
-            onClose={() => setShiftOpen(false)}
-            onClockIn={(s) => {
-              setShifts((ss) => [...ss, s]);
-              run(source.clockIn(s), () => setShifts((ss) => ss.filter((x) => x.id !== s.id))).then(refreshTeam);
-              flash('Clocked in');
-            }}
-            onClockOut={(s, note) => {
-              setShifts((ss) => ss.map((x) => (x.id === s.id ? { ...x, endedAt: Date.now(), handoffNote: note } : x)));
-              run(source.clockOut(s.id, note)).then(refreshTeam);
-              flash(s.userId === source.me.id ? `Clocked out after ${duration(Date.now() - s.startedAt)}` : `${s.userName || 'Valet'} clocked out`);
-            }}
-            onTip={(t) => {
-              setTips((ts) => [...ts, t]);
-              run(source.addTip(t), () => setTips((ts) => ts.filter((x) => x.id !== t.id))).then(refreshTeam);
-              flash(`${money(t.amountCents)} ${t.method === 'cash' ? 'cash' : 'digital'} tip logged`);
-            }}
-            onVoidTip={(t) => {
-              setTips((ts) => ts.filter((x) => x.id !== t.id));
-              run(source.voidTip(t.id), () => setTips((ts) => [...ts, t])).then(refreshTeam);
-            }}
-            onTipUrl={(u) => {
-              setTipUrl(u);
-              run(source.setTipUrl(u)).then(refreshTeam);
-              flash(u ? 'Tip link saved' : 'Tip link removed');
-            }}
-          />
-        </Suspense>
-      )}
-      <Suspense fallback={<Loading />}>
-        {photoCar && <PhotoSheet car={photoCar} source={source} queue={photoQueue} onClose={() => setPhotoCar(null)} />}
-        {guestLinkCar && <GuestLinkDialog car={guestLinkCar} company={account?.companyName} onClose={() => setGuestLinkCar(null)} />}
-      </Suspense>
 
       {showMaps && (
         <MapsDialog
@@ -1447,8 +630,7 @@ export default function App({ source, role, account, initialMaps, initialCars, c
           onTemplate={(t: Template) => load(instantiate(t), true)}
           canEdit={canEdit}
           onDelete={(m) => {
-            run(source.deleteMap(m.id));
-            setCars((cs) => cs.filter((c) => c.mapId !== m.id));
+            source.deleteMap(m.id).catch((e) => flash(friendlyError(e)));
             const rest = maps.filter((x) => x.id !== m.id);
             setMaps(rest);
             if (m.id === map.id) load(rest[0] ?? instantiate(TEMPLATES[0]), false);
@@ -1459,13 +641,4 @@ export default function App({ source, role, account, initialMaps, initialCars, c
       )}
     </div>
   );
-}
-
-/** the payment sheet, with the plate's profile looked up (a monthly pass, a hotel room) */
-function PaySheetFor({
-  lookupPlate,
-  ...p
-}: Omit<ComponentProps<typeof PaymentSheet>, 'history'> & { lookupPlate: (plate: string) => Promise<PlateHistory | null> }) {
-  const history = usePlateHistory(lookupPlate, p.car.plate);
-  return <PaymentSheet {...p} history={history} />;
 }

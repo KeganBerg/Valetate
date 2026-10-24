@@ -1,27 +1,23 @@
-import type { LotMap, ParkedCar } from './types';
+import type { LotMap } from './types';
 
-/**
- * The last maps and cars this phone saw, so the app can open with no signal
- * and still show the lot (changes made then wait in the outbox).
- */
-export interface CachedLot {
+/** The last maps this device saw, so the app can open with no signal. */
+export interface CachedMaps {
   maps: LotMap[];
-  cars: ParkedCar[];
   savedAt: number;
 }
 
-export function saveLot(key: string, maps: LotMap[], cars: ParkedCar[]) {
+export function saveCachedMaps(key: string, maps: LotMap[]) {
   try {
-    localStorage.setItem(key, JSON.stringify({ maps, cars, savedAt: Date.now() } satisfies CachedLot));
+    localStorage.setItem(key, JSON.stringify({ maps, savedAt: Date.now() } satisfies CachedMaps));
   } catch {
     // storage full or blocked: the app still works online
   }
 }
 
-export function loadLot(key: string): CachedLot | null {
+export function loadCachedMaps(key: string): CachedMaps | null {
   try {
     const v = JSON.parse(localStorage.getItem(key) ?? 'null');
-    return v && Array.isArray(v.maps) && Array.isArray(v.cars) ? v : null;
+    return v && Array.isArray(v.maps) ? v : null;
   } catch {
     return null;
   }

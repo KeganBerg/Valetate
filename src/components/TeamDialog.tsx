@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ROLE_INFO, type Role } from '../data/source';
 import { formatCode, inviteLink, team, type Invite, type Member } from '../data/supabase';
-import { QrSvg } from './GuestLink';
+import { QrSvg } from './Qr';
 import { useDialog } from '../dialog';
 
 const ROLES: Role[] = ['admin', 'manager', 'valet'];

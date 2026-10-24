@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch } from 'react';
-import { GRID, LOT_MIN, center, itemBounds, listSpots, lotAround, normalizeAngle, rotatePt, snap, spotAt, toLocal } from '../geometry';
-import { isLight } from '../assets';
-import { colorHex, formatElapsed } from '../ops';
+import { GRID, LOT_MIN, center, itemBounds, lotAround, normalizeAngle, rotatePt, snap, toLocal } from '../geometry';
 import type { Action, Snapshot } from '../store';
-import type { LotMap, MapItem, ParkedCar, Spot } from '../types';
+import type { LotMap, MapItem, Spot } from '../types';
 import { FONT, MapItems } from './MapSvg';
 
 export interface View {
@@ -58,19 +56,9 @@ interface Props {
   showGrid: boolean;
   highlight: Spot | null;
   onDropAsset: (assetName: string, wx: number, wy: number) => void;
-  mode: 'edit' | 'live';
-  /** live mode: cars by Spot.key */
-  occupied: Map<string, ParkedCar>;
-  now: number;
-  activeSpot: string | null;
-  /** live mode: spots whose car has been asked for, by Spot.key */
-  requested?: Map<string, 'open' | 'claimed' | 'ready' | 'pre'>;
-  /** live mode: spots whose car must move before a requested car can get out */
-  mustMove?: Set<string>;
-  onSpotClick: (spot: Spot | null) => void;
+  /** people who can't edit: pan and zoom only */
+  readOnly?: boolean;
 }
-
-const REQ_COLOR = { open: '#ffb020', claimed: '#4da3ff', ready: '#34c759', pre: '#b18cff' } as const;
 
 const clampZ = (z: number) => Math.min(MAX_Z, Math.max(MIN_Z, z));
 
@@ -84,18 +72,11 @@ export function Canvas({
   showGrid,
   highlight,
   onDropAsset,
-  mode,
-  occupied,
-  now,
-  activeSpot,
-  requested,
-  mustMove,
-  onSpotClick,
+  readOnly = false,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<Drag | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const tapSpot = useRef<Spot | null | undefined>(undefined);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [lotDrag, setLotDrag] = useState(false);
   const items = map.items;
@@ -153,10 +134,8 @@ export function Canvas({
     if (pointers.current.size > 2) return;
 
     const w = toWorldPt(p.x, p.y);
-    if (mode === 'live') {
-      // a tap (not a drag) on a spot opens it; dragging pans
+    if (readOnly) {
       drag.current = { mode: 'pan', sx: p.x, sy: p.y, view };
-      tapSpot.current = spotAt(items, w.x, w.y) ?? null;
       return;
     }
     const target = e.target as Element;
@@ -219,7 +198,6 @@ export function Canvas({
       return;
     }
     if (d.mode === 'pan') {
-      if (Math.hypot(p.x - d.sx, p.y - d.sy) > 6) tapSpot.current = undefined;
       setView({ ...d.view, x: d.view.x + p.x - d.sx, y: d.view.y + p.y - d.sy });
       return;
     }
@@ -310,11 +288,6 @@ export function Canvas({
       return;
     }
     drag.current = null;
-    if (d.mode === 'pan' && mode === 'live' && tapSpot.current !== undefined) {
-      onSpotClick(tapSpot.current);
-      tapSpot.current = undefined;
-      return;
-    }
     if (d.mode === 'lot') {
       setLotDrag(false);
       if (map.width !== d.snapshot.width || map.height !== d.snapshot.height) dispatch({ type: 'pushHistory', snapshot: d.snapshot });
@@ -343,15 +316,14 @@ export function Canvas({
 
   const onDrop = (e: React.DragEvent<SVGSVGElement>) => {
     const name = e.dataTransfer.getData('application/x-valetate-asset');
-    if (!name || mode !== 'edit') return;
+    if (!name || readOnly) return;
     e.preventDefault();
     const p = screen(e);
     const w = toWorldPt(p.x, p.y);
     onDropAsset(name, w.x, w.y);
   };
 
-  const sel = mode === 'edit' ? items.filter((it) => selected.includes(it.id)) : [];
-  const liveSpots = mode === 'live' ? listSpots(items) : [];
+  const sel = readOnly ? [] : items.filter((it) => selected.includes(it.id));
   const single = sel.length === 1 ? sel[0] : null;
   const hs = 10 / view.z;
   const stroke = 1.5 / view.z;
@@ -359,7 +331,7 @@ export function Canvas({
   return (
     <svg
       ref={svgRef}
-      className="canvas"
+      className={`canvas ${readOnly ? 'read-only' : ''}`}
       fontFamily={FONT}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -399,7 +371,7 @@ export function Canvas({
         {showGrid && <rect width={map.width} height={map.height} fill="url(#grid-major)" pointerEvents="none" />}
         <MapItems items={items} />
 
-        {mode === 'edit' && (
+        {!readOnly && (
           <g className="lot-frame">
             <rect
               width={map.width}
@@ -510,87 +482,6 @@ export function Canvas({
             ))}
           </g>
         )}
-
-        {liveSpots.map((sp) => {
-          const car = occupied.get(sp.key);
-          const active = sp.key === activeSpot;
-          if (!car && !active) return null;
-          const upright = Math.abs(Math.sin((sp.rotation * Math.PI) / 180)) > Math.abs(Math.cos((sp.rotation * Math.PI) / 180));
-          const bw = upright ? sp.h : sp.w;
-          const bh = upright ? sp.w : sp.h;
-          const fill = car ? (colorHex(car.color) ?? '#d6343a') : '#4da3ff';
-          const ink = car && isLight(fill) ? '#111' : '#fff';
-          const tag = car ? (car.ticket ? `#${car.ticket}` : car.plate) : '';
-          const fs = Math.max(5, Math.min(13, (bw * 0.9) / Math.max(3, tag.length * 0.62), bh / 2.8));
-          return (
-            <g key={sp.key} pointerEvents="none">
-              <g transform={`translate(${sp.cx} ${sp.cy}) rotate(${sp.rotation})`}>
-                <rect
-                  x={-sp.w / 2 + 1.5}
-                  y={-sp.h / 2 + 1.5}
-                  width={sp.w - 3}
-                  height={sp.h - 3}
-                  rx={Math.min(sp.w, sp.h) * 0.18}
-                  fill={fill}
-                  fillOpacity={car ? 1 : 0.35}
-                  stroke={active ? '#4da3ff' : '#0b0d10'}
-                  strokeWidth={active ? 3.5 : 1.5}
-                />
-              </g>
-              {car && (
-                <g transform={`translate(${sp.cx} ${sp.cy})`}>
-                  <text textAnchor="middle" y={-fs * 0.5} fontSize={fs} fontWeight={800} fill={ink}>
-                    {tag}
-                  </text>
-                  <text textAnchor="middle" y={fs * 0.75} fontSize={fs * 0.85} fontWeight={600} fill={ink} opacity={0.85}>
-                    {formatElapsed(now - car.parkedAt)}
-                  </text>
-                </g>
-              )}
-            </g>
-          );
-        })}
-
-        {liveSpots.map((sp) => {
-          const st = requested?.get(sp.key);
-          if (!st) return null;
-          const pad = 5;
-          return (
-            <g key={`req-${sp.key}`} transform={`translate(${sp.cx} ${sp.cy}) rotate(${sp.rotation})`} pointerEvents="none">
-              <rect
-                className={`req-ring ${st}`}
-                x={-sp.w / 2 - pad}
-                y={-sp.h / 2 - pad}
-                width={sp.w + pad * 2}
-                height={sp.h + pad * 2}
-                rx={6}
-                fill="none"
-                stroke={REQ_COLOR[st]}
-                strokeWidth={Math.max(3, 3 / view.z)}
-              />
-            </g>
-          );
-        })}
-
-        {mustMove &&
-          liveSpots
-            .filter((sp) => mustMove.has(sp.key))
-            .map((sp) => (
-              <g key={`move-${sp.key}`} transform={`translate(${sp.cx} ${sp.cy}) rotate(${sp.rotation})`} pointerEvents="none">
-                <rect
-                  className="move-ring"
-                  x={-sp.w / 2 - 5}
-                  y={-sp.h / 2 - 5}
-                  width={sp.w + 10}
-                  height={sp.h + 10}
-                  rx={6}
-                  fill="none"
-                  stroke="#ff7a45"
-                  strokeWidth={Math.max(3, 3 / view.z)}
-                  strokeDasharray={`${Math.max(6, 6 / view.z)} ${Math.max(4, 4 / view.z)}`}
-                />
-              </g>
-            ))}
 
         {highlight && (
           <g transform={`translate(${highlight.cx} ${highlight.cy}) rotate(${highlight.rotation})`} pointerEvents="none">
